@@ -1,5 +1,7 @@
 import { Log } from "./log";
 
+
+// Unit tests for Log utility
 describe('Log', () => {
   describe('Basic Log stuff', () => {
     let logOutput = new Array<string>;
