@@ -26,4 +26,6 @@ jobs:
 
       - name: Run unit tests
         run: yarn test
+
+      - name: Job status
         run: echo "This job's status is ${{ job.status }}."
