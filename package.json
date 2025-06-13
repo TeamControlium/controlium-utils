@@ -64,6 +64,9 @@
     "transformIgnorePatterns": [],
     "coverageDirectory": "../coverage",
     "coverageReporters": [
+      "html",
+      "text",
+      "lcov",
       "json-summary"
     ],
     "coverageThreshold": {

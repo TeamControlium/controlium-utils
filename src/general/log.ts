@@ -11,7 +11,7 @@ export class Log {
     private static _stepEndScreenshot = false;
     private static _logOutputCallback: Log.LogOutputCallbackSignature | undefined = undefined;
 
-    private static _videoWidth  = 320;
+    private static _videoWidth = 320;
     private static _videoHeight = 180;
 
     private static _durationFormat = 'hh:mm:ss.S';
@@ -25,7 +25,7 @@ export class Log {
      */
     public static get loggingCurrentLevelText(): string {
         if (this._loggingCurrentLevel != Log.LogLevels.NoOutput && this._loggingCurrentLevel > Log.LogLevels.FrameworkDebug) {
-            return `Special Level - [${this._loggingCurrentLevel}]`
+            return `Special Level - (${this._loggingCurrentLevel})]`
         }
         switch (this._loggingCurrentLevel) {
             case Log.LogLevels.FrameworkDebug:
@@ -91,7 +91,8 @@ export class Log {
                     this._loggingCurrentLevel = Log.LogLevels.Error;
                     break;
                 }
-                case 'nooutput': {
+                case 'nooutput':
+                case 'noout': {
                     this._loggingCurrentLevel = Log.LogLevels.NoOutput;
                     break;
                 }
@@ -101,11 +102,12 @@ export class Log {
                 }
             }
         } else {
-            if (typeof requiredLevel === 'number' && requiredLevel > 0) {
+            if (typeof requiredLevel === 'number' && requiredLevel > 0 && Number.isInteger(requiredLevel)) {
                 this._loggingCurrentLevel = requiredLevel;
             }
             else {
-                Log.writeLine(0, `Required level [${requiredLevel ?? '<Unknown>'}] not a string or number greater than 0.  Not set!`);
+                this._loggingCurrentLevel = Log.LogLevels.FrameworkDebug;
+                Log.writeLine(0, `Invalid Log Level [${Number(requiredLevel)}] (Must be integer greater than zero). Defaulting to Framework Debug!`);
             }
         }
     }
@@ -181,6 +183,9 @@ export class Log {
      * @param [res.height] Video height in pixels (optional).
      * @param [res.width] Video width in pixels (optional).
      */
+    public static get videoResolution(): { height: number, width: number } {
+        return { height: this._videoHeight, width: this._videoWidth };
+    }
     public static set videoResolution(res: { height?: number, width?: number }) {
 
         const isValidNumber = (val: unknown, min: number, max: number): boolean =>
@@ -191,7 +196,7 @@ export class Log {
 
 
         if (!heightGood) {
-            Log.writeLine(Log.LogLevels.Error, `Invalid video win0dow height [${res.height}]: must be number between 180 and 4320. Height (& Width if set) ignored`);
+            Log.writeLine(Log.LogLevels.Error, `Invalid video window height [${res.height}]: must be number between 180 and 4320. Height (& Width if set) ignored`);
         }
 
         if (!widthGood) {
@@ -408,6 +413,10 @@ export class Log {
                 this._logOutputCallback!(textToWrite);
                 doneCallbackWrite = true;
             }
+
+            if (!doneConsoleWrite && !doneCallbackWrite) {
+                console.log(textToWrite);
+            }
         }
     }
 
@@ -464,7 +473,7 @@ export class Log {
                 methodName = methodBaseLines[1].replace(/\s\s+/g, ' ').trim();
                 if (methodName.startsWith('at ')) {
                     const tempA = methodName.split(' ');
-                    methodName = tempA.slice(0,1).concat([tempA.slice(1).join(' ')])[1];
+                    methodName = tempA.slice(0, 1).concat([tempA.slice(1).join(' ')])[1];
                     if (
                         methodName.includes('/') &&
                         methodName.includes(':') &&
