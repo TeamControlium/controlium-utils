@@ -27,19 +27,5 @@ jobs:
       - name: Run unit tests
         run: yarn test:coverage
 
-      - name: Generate Coverage Badge
-        uses: davelosert/jest-coverage-report-action@v1
-        with:
-          coverage-file: coverage/coverage-summary.json
-          badge-directory: .github/badges
-
-      - name: Commit coverage badge if changed
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: '.github/badges/coverage.svg'
-          message: 'chore: update coverage badge'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Job status
         run: echo "This job's status is ${{ job.status }}."
