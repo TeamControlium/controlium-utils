@@ -28,7 +28,7 @@ jobs:
         run: yarn test:coverage
 
       - name: Generate Coverage Badge
-        uses: davelosert/jest-coverage-report-action@v2
+        uses: davelosert/jest-coverage-report-action@v1
         with:
           coverage-file: coverage/coverage-summary.json
           badge-directory: .github/badges
