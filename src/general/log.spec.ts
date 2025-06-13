@@ -24,7 +24,7 @@ describe('Log', () => {
 
 
       expect(logOutput.length).toStrictEqual(6);
-      expect(logOutput[0]).toMatch(/Message: \[ERROR - .*$/);
+      expect(logOutput[0]).toMatch(/Message: \[zERROR - .*$/);
       expect(logOutput[1]).toMatch(/Message: \[FKDBG - .*$/);
       expect(logOutput[2]).toMatch(/Message: \[FKINF - .*$/);
       expect(logOutput[3]).toMatch(/Message: \[TSDBG - .*$/);
