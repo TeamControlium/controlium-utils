@@ -20,6 +20,8 @@
     "clean": "rm -rf dist",
     "build": "tsc",
     "test": "yarn jest --silent --runInBand --testMatch=**/*.spec.ts",
+    "test:debug": "yarn jest --runInBand --testMatch=**/*.spec.ts",
+    "test:coverage": "yarn jest --silent --coverage --runInBand --testMatch=**/*.spec.ts",
     "release": "semantic-release",
     "lint": "eslint \"src/**/*.ts\" --fix"
   },
@@ -50,7 +52,6 @@
   "jest": {
     "moduleFileExtensions": [
       "js",
-      "json",
       "ts"
     ],
     "testMatch": [
@@ -63,11 +64,7 @@
     "transformIgnorePatterns": [],
     "coverageDirectory": "../coverage",
     "coverageReporters": [
-      "clover",
-      "json",
-      "lcov",
-      "text",
-      "cobertura"
+      "json-summary"
     ],
     "coverageThreshold": {
       "global": {

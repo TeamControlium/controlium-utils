@@ -10,15 +10,11 @@ tmp/
 package-lock.json
 
 
-/template/**/yarn.lock
-
-
 # compiled output
 /dist
 /tmp
 /out-tsc
-# Only exists if Bazel was run
-/bazel-out
+
 
 # dependencies
 node_modules
@@ -33,22 +29,14 @@ speed-measure-plugin.json
 .classpath
 .c9/
 *.launch
-.settings/
 *.sublime-workspace
-.vscode/*
 .history/*
 
 # misc
-/.sass-cache
-/connect.lock
 /coverage
-/libpeerconnection.log
 npm-debug.log
 yarn-error.log
-testem.log
-/typings
-/writeTextToFile
-/test/*
+
 
 # System Files
 .DS_Store
