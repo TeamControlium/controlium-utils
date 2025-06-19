@@ -1,0 +1,84 @@
+{
+  "name": "controlium-utils",
+  "author": "Team Controllium contributors",
+  "license": "MIT",
+  "version": "0.0.0-semantically-released",
+  "description": "General use utilities for Team Controlium Node based test automation framework.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc",
+    "test": "yarn jest --silent --runInBand --testMatch=**/*.spec.ts",
+    "test:debug": "yarn jest --runInBand --testMatch=**/*.spec.ts",
+    "test:coverage": "yarn jest --silent --coverage --runInBand --testMatch=**/*.spec.ts",
+    "release": "semantic-release",
+    "lint": "eslint \"src/**/*.ts\" --fix"
+  },
+  "keywords": [
+    "typescript",
+    "node",
+    "esm",
+    "library"
+  ],
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.0",
+    "@semantic-release/commit-analyzer": "^10.0.0",
+    "@semantic-release/git": "^10.0.0",
+    "@semantic-release/npm": "^11.0.0",
+    "@semantic-release/release-notes-generator": "^12.0.0",
+    "@types/jest": "^29.5.0",
+    "@types/luxon": "^3.6.2",
+    "@types/node": "^24.0.1",
+    "jest": "^29.6.0",
+    "semantic-release": "^22.0.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.8.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "ts"
+    ],
+    "testMatch": [
+      "**/*.spec.ts"
+    ],
+    "rootDir": "src",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "transformIgnorePatterns": [],
+    "coverageDirectory": "../coverage",
+    "coverageReporters": [
+      "html",
+      "text",
+      "lcov",
+      "json-summary"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 88,
+        "functions": 90,
+        "lines": 90,
+        "statements": 90
+      }
+    },
+    "testEnvironment": "node",
+    "reporters": [
+      "default"
+    ]
+  }
+}

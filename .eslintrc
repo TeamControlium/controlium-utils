@@ -1,0 +1,7 @@
+{
+  "extends": "@eadigital",
+  "ignorePatterns": ["**/*.spec.ts"],
+  "rules": {
+    "@typescript-eslint/no-namespace": "off"
+  }
+}

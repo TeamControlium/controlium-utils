@@ -1,0 +1,43 @@
+# See http:
+
+.serverless/
+dist/
+lib*/
+node_modules_bak/
+tmp/
+
+*.tsbuildinfo
+package-lock.json
+
+
+# compiled output
+/dist
+/tmp
+/out-tsc
+
+
+# dependencies
+node_modules
+
+# profiling files
+chrome-profiler-events.json
+speed-measure-plugin.json
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+*.sublime-workspace
+.history/*
+
+# misc
+/coverage
+npm-debug.log
+yarn-error.log
+
+
+# System Files
+.DS_Store
+Thumbs.db
