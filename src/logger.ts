@@ -361,6 +361,12 @@ export class Logger {
     }
   }
 
+/**
+ * Attach video to log output
+ * @param logLevel 
+ * @param video 
+ * @param options 
+ */
   public static attachVideo(
     logLevel: number,
     video: Buffer,
