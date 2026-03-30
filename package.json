@@ -1,7 +1,7 @@
 {
-  "name": "@controlium/logger",
+  "name": "@controlium/utils",
   "version": "1.0.0",
-  "description": "Controls and performs all logging related activity",
+  "description": "Shared utilities for Controlium-based projects",
   "type": "module",
   "author": "Team Controllium contributors",
   "contributors": [
@@ -37,10 +37,12 @@
     "node",
     "esm",
     "cjs",
-    "logger"
+    "logger",
+    "utilities"
   ],
   "devDependencies": {
     "@types/jest": "^29.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
@@ -86,6 +88,15 @@
     ]
   },
   "dependencies": {
-    "date-fns": "^4.1.0"
+    "@types/jsonpath-plus": "^5.0.2",
+    "@types/lodash": "^4.14.195",
+    "@types/ps-tree": "^1.1.6",
+    "date-fns": "^4.1.0",
+    "entities": "^6.0.1",
+    "jsonpath-plus": "^10.3.0",
+    "jsonpointer": "^5.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "lodash": "^4.17.12",
+    "ps-tree": "^1.2.0"
   }
 }
