@@ -11,148 +11,278 @@ import { JsonUtils } from "../index";
 import { Log, LogLevel, LogLevels } from "../index";
 import { StringUtils } from "../index";
 
+// ─── Module-level constants ───────────────────────────────────────────────────
 
-//
-// This is pre-amble of env var names that are stores of
-// original env var values before tests changed them.
-// This enables reset of env vars back to original values and
-// so prevents test dependence (IE. Test passing/failing depending
-// on what test/s have executed prior.
-//
+/** Milliseconds in one second. */
+const MS_PER_SECOND = 1000;
+
+/** Milliseconds in one day. */
+const MS_PER_DAY = 86400000;
+
 /**
- * Pre-amble of store for original var
+ * Prefix used when storing the original value of a modified environment variable.
+ * Allows {@link Utils.resetProcessEnvs} to restore variables to their pre-test values.
  */
-const envVarOriginalPreamble = "test_old_";
+const ENV_VAR_ORIGINAL_PREAMBLE = "test_old_";
 
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
 /**
- * What action to perform if file exists when Utils.writeTextToFile called
+ * What action to perform if a file already exists when {@link Utils.writeTextToFile} is called.
  */
 export enum ExistingFileWriteActions {
     /** Overwrite existing file */
     Overwrite,
-    /** Create new file using a file index in file-name */
+    /** Create a new file using an incrementing index in the file name */
     AddIndex,
-    /** Append data to existing data in file */
+    /** Append data to the existing file contents */
     Append,
-    /** Throw an error stating file already exists */
+    /** Throw an error indicating the file already exists */
     ThrowError,
 }
 
+// ─── Interfaces ───────────────────────────────────────────────────────────────
+
 /**
- * Maps typeof string literals to their corresponding TypeScript types.
+ * Maps `typeof` string literals to their corresponding TypeScript types.
  * Used by {@link Utils.assertType} to provide type narrowing after assertion.
  */
 export interface AssertTypeMap {
-  string: string;
-  number: number;
-  boolean: boolean;
-  object: object;
-  bigint: bigint;
-  symbol: symbol;
-  function: (...args: unknown[]) => unknown;
+    string: string;
+    number: number;
+    boolean: boolean;
+    object: object;
+    bigint: bigint;
+    symbol: symbol;
+    function: (...args: unknown[]) => unknown;
 }
 
+// ─── Utils ────────────────────────────────────────────────────────────────────
+
 /**
- * General testing-related Utilities
+ * General testing-related utilities. All methods are static — no instantiation required.
  */
 export class Utils {
+
+    // ── Private state ────────────────────────────────────────────────────────
+
     private static _promiseCount = 0;
     private static _defaultPromiseTimeout = 0;
 
+    // ── Promise tracking ─────────────────────────────────────────────────────
+
     /**
-     * Gets promise count (number of currently outstanding promises)
+     * Number of currently outstanding promises wrapped by {@link timeoutPromise}.
+     * Check this at the end of a test to verify all promises have settled.
+     * @see {@link resetPromiseCount}
      */
     static get promiseCount(): number {
         return Utils._promiseCount;
     }
 
     /**
-     * Resets numnber of outstanding promises.
+     * Resets the outstanding promise count to zero.
+     * @see {@link promiseCount}
      */
     static resetPromiseCount() {
         Utils._promiseCount = 0;
     }
 
     /**
-     * Sets default promise timeout
+     * Sets the default timeout in milliseconds applied by {@link timeoutPromise}
+     * when no per-call `timeoutMS` is supplied.
+     * @param timeoutMs - Timeout in milliseconds. Must be greater than zero.
      */
     static set defaultPromiseTimeout(timeoutMs: number) {
         Utils._defaultPromiseTimeout = timeoutMs;
     }
 
-    /**
-     * Convert Milliseconds to string HHMMSS
-     * @param milliSeconds
-     * Number to convert
-     * @returns
-     * Time in HH:MM:SS.n format.
-     * @note
-     * times above 359999000 (99H 59M 59S will give unknown result)
-     * @todo
-     * Consider using the date-fns library; may be a cleaner/simpler way of doing it with more options for date formatting.
-     */
-    static msToHMS(milliSeconds: number): string {
-        const wholeDays = Math.floor(milliSeconds / 86400000);
-        const date = new Date(milliSeconds - wholeDays * 86400000);
-        const hours = wholeDays * 24 + date.getUTCHours();
+    // ── Type checking ─────────────────────────────────────────────────────────
 
-        return `${this.pad(hours, ("" + hours).length > 2 ? ("" + hours).length : 2)}:${this.pad(date.getUTCMinutes(), 2)}:${this.pad(
-            date.getUTCSeconds(),
-            2
-        )}.${Math.round(date.getUTCMilliseconds() / 100)}`;
+    /**
+     * Asserts that a value is of the expected type, throwing a logged error if not.
+     * After a successful call, TypeScript narrows `value` to the corresponding type.
+     *
+     * @param value - Value to check.
+     * @param expectedType - Expected `typeof` string (e.g. `"string"`, `"number"`).
+     * @param funcName - Name of the calling function, used in the error message.
+     * @param paramName - Name of the parameter being checked, used in the error message.
+     * @throws {Error} If `typeof value` does not match `expectedType`.
+     *
+     * @example
+     * Utils.assertType(name, "string", "greet", "name");
+     * // name is now narrowed to string
+     */
+    public static assertType<K extends keyof AssertTypeMap>(value: unknown, expectedType: K, funcName: string, paramName: string): asserts value is AssertTypeMap[K] {
+        if (typeof value !== expectedType) {
+            const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
+            Log.writeLine(LogLevels.Error, errorText);
+            throw new Error(errorText);
+        }
     }
 
     /**
-     * Checks is value is a key in an Enum object
-     * @param enumType
-     * ENUM to check
-     * @param valueToCheck
-     * Value to check it exists
-     * @returns
-     * true if exists else false
+     * Safely checks if a value is `null` or `undefined`.
+     *
+     * @param obj - Value to check.
+     * @returns `true` if `null` or `undefined`, otherwise `false`.
      */
-    static checkENUMValueExists(enumType: object, valueToCheck: string) {
+    static isNullOrUndefined(obj?: unknown): boolean {
         try {
-            return Object.values(enumType).includes(valueToCheck);
+            return obj === null || obj === undefined;
+        } catch {
+            return true;
+        }
+    }
+
+    /**
+     * Safely checks if a value is `null`.
+     *
+     * @param obj - Value to check.
+     * @returns `true` if `null`, otherwise `false`.
+     */
+    static isNull(obj?: unknown): boolean {
+        return obj === null;
+    }
+
+    /**
+     * Safely checks if a value is `undefined`.
+     *
+     * @param obj - Value to check.
+     * @returns `true` if `undefined`, otherwise `false`.
+     */
+    static isUndefined(obj?: unknown): boolean {
+        return obj === undefined;
+    }
+
+    /**
+     * Checks whether a value evaluates to `true` according to common conventions.
+     *
+     * Returns `true` for:
+     * - A boolean `true`
+     * - The strings `"y"`, `"1"`, `"yes"`, `"positive"`, or `"true"` (case-insensitive, trimmed)
+     * - A number greater than zero
+     *
+     * @param valueToCheck - Value to evaluate.
+     * @returns `true` if the value is considered truthy, otherwise `false`.
+     */
+    static isTrue(valueToCheck: boolean | string | number | undefined): boolean {
+        switch (typeof valueToCheck) {
+            case "boolean":
+                return valueToCheck;
+            case "string": {
+                const normalizedValue = valueToCheck.toLowerCase().trim();
+                return (
+                    normalizedValue === "y" ||
+                    normalizedValue === "1" ||
+                    normalizedValue === "yes" ||
+                    normalizedValue === "positive" ||
+                    normalizedValue === "true"
+                );
+            }
+            case "number":
+                return valueToCheck > 0;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Verifies whether a value is a valid `Date` object.
+     *
+     * @param dateToCheck - Value to validate.
+     * @returns `true` if the value is a `Date` instance with a valid time, otherwise `false`.
+     */
+    static isValidDate(dateToCheck: unknown): dateToCheck is Date {
+        try {
+            return dateToCheck instanceof Date && !isNaN(dateToCheck.getTime());
         } catch {
             return false;
         }
     }
 
+    // ── Math / string helpers ─────────────────────────────────────────────────
+
     /**
-     * Prepends given number with leading Zeros to required length
-     * @param requiredMinimumLength
-     * Required minimum length of string
-     * @returns
-     * Given Number, as String, with Leading zeros to required length.
-     * @note
-     * If number length is longer than required size no truncation occures, so MAY be longer than requiredMinimumLength.
+     * Pads a number or string with leading zeros to reach a required minimum length.
+     *
+     * @param num - The number or string to pad.
+     * @param requiredMinimumLength - The minimum length of the returned string.
+     * @returns The value as a string, left-padded with `"0"` to at least `requiredMinimumLength` characters.
+     * @note If the value is already longer than `requiredMinimumLength`, no truncation occurs.
+     *
+     * @example
+     * Utils.pad(7, 3);    // => "007"
+     * Utils.pad("42", 5); // => "00042"
      */
     static pad(num: number | string, requiredMinimumLength: number): string {
-        let numString = typeof num == "number" ? num.toString() : num;
+        let numString = typeof num === "number" ? num.toString() : num;
         while (numString.length < requiredMinimumLength) numString = "0" + numString;
         return numString;
     }
 
     /**
-     * Safely writes data to a File
-     * @param filePath
-     * Path to where file should created
-     * @param fileName
-     * Name of file to be written to
-     * @param data
-     * Text or an object to write to file (if an Object, JSON.stringify used to convert to string)
-     * @param ifExistsAction
-     * What action to take if file already exists; possibilities
-     * are Append, AddIndex (default), Overwrite or Throw an error
-     * @see enum ExistingFileWriteActions
+     * Converts a millisecond duration to a `HH:MM:SS.t` formatted string,
+     * where `t` is tenths of a second.
+     *
+     * @param milliSeconds - Duration in milliseconds.
+     * @returns Time string formatted as `HH:MM:SS.t`.
+     * @note Durations above 359,999,000 ms (99h 59m 59s) will give unexpected results.
+     */
+    static msToHMS(milliSeconds: number): string {
+        const wholeDays = Math.floor(milliSeconds / MS_PER_DAY);
+        const date = new Date(milliSeconds - wholeDays * MS_PER_DAY);
+        const hours = wholeDays * 24 + date.getUTCHours();
+        return `${this.pad(hours, ("" + hours).length > 2 ? ("" + hours).length : 2)}:${this.pad(date.getUTCMinutes(), 2)}:${this.pad(date.getUTCSeconds(), 2)}.${Math.round(date.getUTCMilliseconds() / 100)}`;
+    }
+
+    /**
+     * Returns a random integer between `min` and `max` inclusive.
+     * If `max` is less than `min`, the values are swapped.
+     *
+     * @param min - Lower bound.
+     * @param max - Upper bound.
+     * @returns A random integer inclusively between `min` and `max`.
+     */
+    static getRandomInt(min: number, max: number): number {
+        const minMax = min < max ? Math.ceil(min) : Math.ceil(max);
+        const maxMin = min < max ? Math.floor(max) : Math.floor(min);
+        return Math.floor(Math.random() * (maxMin - minMax + 1)) + minMax;
+    }
+
+    /**
+     * Returns a random float between `min` and `max`.
+     *
+     * @param min - Lower bound.
+     * @param max - Upper bound.
+     * @returns A random float between `min` and `max`.
+     */
+    static getRandomFloat(min: number, max: number): number {
+        return Math.random() * (max - min) + min;
+    }
+
+    // ── File operations ───────────────────────────────────────────────────────
+
+    /**
+     * Writes data to a file, with configurable behaviour when the file already exists.
+     *
+     * Data is serialised before writing:
+     * - JSON strings are normalised (parsed then re-stringified).
+     * - Non-JSON strings are written as-is.
+     * - Objects are written as pretty-printed JSON.
+     *
+     * @param filePath - Directory path where the file should be created.
+     * @param fileName - Name of the file to write.
+     * @param data - Content to write — a string or an object.
+     * @param ifExistsAction - Action to take if the file already exists (default: `AddIndex`).
+     * @see {@link ExistingFileWriteActions}
+     * @throws {Error} If the write fails, or if `ThrowError` is specified and the file exists.
      */
     static writeTextToFile(filePath: string, fileName: string, data: string | object, ifExistsAction = ExistingFileWriteActions.AddIndex): void {
         let fullFilename = path.join(filePath, fileName);
         try {
             if (!existsSync(filePath)) {
-                Log.writeLine(LogLevels.FrameworkInformation, `Folder [${filePath}] does not exist to creating`);
+                Log.writeLine(LogLevels.FrameworkInformation, `Folder [${filePath}] does not exist so creating`);
                 mkdirSync(filePath, { recursive: true });
             }
             if (existsSync(fullFilename)) {
@@ -161,18 +291,18 @@ export class Utils {
                     case ExistingFileWriteActions.AddIndex: {
                         const splitFileName = fileName.split(".");
                         fileName =
-                            splitFileName.length == 1
+                            splitFileName.length === 1
                                 ? fileName + ".1"
                                 : ((splitFileName: string[]): string => {
-                                    // If file name has 2 parts (EG. hello.json) then add the index (EG. hello.1.json)
-                                    if (splitFileName.length == 2) {
+                                    // If file name has 2 parts (e.g. hello.json) then add the index (e.g. hello.1.json)
+                                    if (splitFileName.length === 2) {
                                         if (/^\d+$/.test(splitFileName[1])) {
                                             return splitFileName[0] + "." + (parseInt(splitFileName[1]) + 1);
                                         } else {
                                             return splitFileName[0] + ".1." + splitFileName[1];
                                         }
                                     }
-                                    // If file name has an index (EG. hello.7.json or some.other.5.json) increment it
+                                    // If file name has an index (e.g. hello.7.json or some.other.5.json) increment it
                                     if (/^\d+$/.test(splitFileName[splitFileName.length - 2])) {
                                         return (
                                             splitFileName.slice(0, splitFileName.length - 2).join(".") +
@@ -182,64 +312,43 @@ export class Utils {
                                             splitFileName[splitFileName.length - 1]
                                         );
                                     }
-                                    // file name is 3 parts, or more, but without a valid index (EG. hello.addd.json).  so add the index (EG. hello.addd.1.json)
+                                    // 3+ part name without a numeric index (e.g. hello.addd.json) — add index (e.g. hello.addd.1.json)
                                     return splitFileName.slice(0, splitFileName.length - 1).join(".") + ".1." + splitFileName[splitFileName.length - 1];
                                 })(splitFileName);
                         this.writeTextToFile(filePath, fileName, data, ifExistsAction);
                         break;
                     }
                     case ExistingFileWriteActions.Append: {
-                        appendFileSync(
-                            fullFilename,
-                            "\n" + (typeof data == "string")
-                                ? JsonUtils.isJson(data)
-                                    ? JSON.stringify(JSON.parse(data as string))
-                                    : (data as string)
-                                : JSON.stringify(data, null, 2)
-                        );
+                        appendFileSync(fullFilename, "\n" + Utils.serialiseFileData(data));
                         break;
                     }
                     case ExistingFileWriteActions.Overwrite: {
-                        writeFileSync(
-                            fullFilename,
-                            "\n" + (typeof data == "string")
-                                ? JsonUtils.isJson(data)
-                                    ? JSON.stringify(JSON.parse(data as string))
-                                    : (data as string)
-                                : JSON.stringify(data, null, 2)
-                        );
+                        writeFileSync(fullFilename, Utils.serialiseFileData(data));
                         break;
                     }
                     case ExistingFileWriteActions.ThrowError: {
-                        const errText = `File [${fullFilename}] exists and Action [${ifExistsAction}]!`;
+                        const errText = `File [${fullFilename}] exists and action is ThrowError!`;
                         Log.writeLine(LogLevels.Error, errText);
                         throw new Error(errText);
                     }
                     default: {
-                        const errText = `Cannot write to file [${fullFilename}] using [${ifExistsAction}]!  Dunno what to do!!??`;
+                        const errText = `Cannot write to file [${fullFilename}] — unknown action [${ifExistsAction}]!`;
                         Log.writeLine(LogLevels.Error, errText);
                         throw new Error(errText);
                     }
                 }
             } else {
                 const splitFileName = fileName.split(".");
-                if (splitFileName.length == 1) {
-                    if (ifExistsAction == ExistingFileWriteActions.AddIndex) {
+                if (splitFileName.length === 1) {
+                    if (ifExistsAction === ExistingFileWriteActions.AddIndex) {
                         this.writeTextToFile(filePath, fileName + ".1", data, ifExistsAction);
                     } else {
-                        writeFileSync(
-                            fullFilename,
-                            "\n" + (typeof data == "string")
-                                ? JsonUtils.isJson(data)
-                                    ? JSON.stringify(JSON.parse(data as string))
-                                    : (data as string)
-                                : JSON.stringify(data, null, 2)
-                        );
+                        writeFileSync(fullFilename, Utils.serialiseFileData(data));
                     }
                 } else {
                     if (
-                        !(splitFileName.length == 2 && /^\d+$/.test(splitFileName[splitFileName.length - 1])) &&
-                        ifExistsAction == ExistingFileWriteActions.AddIndex &&
+                        !(splitFileName.length === 2 && /^\d+$/.test(splitFileName[splitFileName.length - 1])) &&
+                        ifExistsAction === ExistingFileWriteActions.AddIndex &&
                         !/^\d+$/.test(splitFileName[splitFileName.length - 2])
                     ) {
                         fileName = splitFileName.slice(0, splitFileName.length - 1).join(".") + ".1." + splitFileName[splitFileName.length - 1];
@@ -248,7 +357,7 @@ export class Utils {
                     if (existsSync(fullFilename)) {
                         this.writeTextToFile(filePath, fileName, data, ifExistsAction);
                     } else {
-                        writeFileSync(fullFilename, "\n" + (typeof data == "string" ? data : JsonUtils.isJson(data) ? JSON.stringify(data, null, 2) : data));
+                        writeFileSync(fullFilename, Utils.serialiseFileData(data));
                     }
                 }
             }
@@ -259,28 +368,25 @@ export class Utils {
     }
 
     /**
-     * Returns entire contents of a file in a String
-     * @param path
-     * A path to a file. If a URL is provided, it must use the file: protocol. URL support is experimental. If a file descriptor is provided, the underlying file will not be closed automatically.
-     * @param options
-     * Optional set of options
-     *  - encoding (default Utf-8): File encoding to use when loading
-     *  - detokeniseFileContents (default false): pass file contents through detokeniser before returning string
-     * File contents are encoded as defined before returning.  Default UTF-8
-     * @param path
-     * @returns
-     * Contents of file referenced
+     * Returns the entire contents of a file as a string.
+     *
+     * @param path - Path to the file.
+     * @param options - Optional settings:
+     *   - `encoding` — File encoding (default: `"utf-8"`).
+     *   - `detokeniseFileContents` — When `true`, passes contents through the detokeniser before returning (default: `false`).
+     * @returns Contents of the file as a string.
+     * @throws {Error} If the file cannot be read.
      */
-    static getFileContents(path: string, options?: { encoding?: BufferEncoding; detokeniseFileContents?: boolean }): string {
+    static getFileContents(filePath: string, options?: { encoding?: BufferEncoding; detokeniseFileContents?: boolean }): string {
         const detokenise = options?.detokeniseFileContents ?? false;
         const encoding = options?.encoding ?? "utf-8";
         try {
-            Log.writeLine(LogLevels.FrameworkInformation, `Load file [${path}] using Encode into [${encoding}]`);
-            let contents = this.getFileContentsBuffer(path).toString(encoding);
-            Log.writeLine(LogLevels.FrameworkDebug, `Loaded [${contents.length ?? "No data!!??"}] characters`);
+            Log.writeLine(LogLevels.FrameworkInformation, `Load file [${filePath}] using encoding [${encoding}]`);
+            let contents = this.getFileContentsBuffer(filePath).toString(encoding);
+            Log.writeLine(LogLevels.FrameworkDebug, `Loaded [${contents.length}] characters`);
             if (detokenise) {
                 // contents = Detokeniser.do(contents); Hey Claude, dont forget.  Masked out for now...
-                Log.writeLine(LogLevels.FrameworkDebug, `After detokenisation [${contents.length ?? "No data!!??"}] characters`);
+                Log.writeLine(LogLevels.FrameworkDebug, `After detokenisation [${contents.length}] characters`);
                 return contents;
             }
             return contents;
@@ -292,163 +398,42 @@ export class Utils {
     }
 
     /**
-     * Returns entire contents of a file in a Buffer
-     * @param path
-     * A path to a file. If a URL is provided, it must use the file: protocol.
-     * @param path
-     * @returns
-     * Contents of file referenced
+     * Returns the entire contents of a file as a `Buffer`.
+     *
+     * @param path - Path to the file.
+     * @returns Raw file contents as a `Buffer`.
+     * @throws {Error} If the file cannot be read.
      */
-    static getFileContentsBuffer(path: string): Buffer {
+    static getFileContentsBuffer(filePath: string): Buffer {
         try {
-            Log.writeLine(LogLevels.FrameworkInformation, `Getting file contents from [${path}]`);
-            return readFileSync(path);
+            Log.writeLine(LogLevels.FrameworkInformation, `Getting file contents from [${filePath}]`);
+            return readFileSync(filePath);
         } catch (err) {
-            const errText = `Utils.getFileContentsBuffer - readFileSync for path [${path}] threw error: [${err}]`;
+            const errText = `Utils.getFileContentsBuffer - readFileSync for path [${filePath}] threw error: [${err}]`;
             Log.writeLine(LogLevels.Error, errText);
             throw new Error(errText);
         }
     }
 
-    /**
-     * Verifies if parameter is a valid Date
-     * @param dateToCheck
-     * Date variable to validate
-     * @returns
-     * True if parameter is a type Date and can be used to obtain a valid time
-     */
-    static isValidDate(dateToCheck: unknown): dateToCheck is Date {
-        try {
-            return dateToCheck instanceof Date && !isNaN(dateToCheck.getTime());
-        } catch {
-            return false;
-        }
-    }
+    // ── Environment variables ─────────────────────────────────────────────────
 
     /**
-     * Returns a random integer value between (inclusive) two given values
-     * @param min
-     * Minimum number to return
-     * @param max
-     * Maximum number to return
-     * @returns
-     * Random integer number inclusively between given Min and Max.  If Max less than Min they are reversed.
-     */
-    static getRandomInt(min: number, max: number): number {
-        const minMax = min < max ? Math.ceil(min) : Math.ceil(max);
-        const maxMin = min < max ? Math.floor(max) : Math.floor(min);
-        return Math.floor(Math.random() * (maxMin - minMax + 1)) + minMax;
-    }
-
-    /**
-     * Returns a random float value between (inclusive) two given values
-     * @param min
-     * Minimum number to return
-     * @param max
-     * Maximum number to return
-     * @returns
-     * Random number inclusively between given Min and Max.
-     */
-    static getRandomFloat(min: number, max: number): number {
-        return Math.random() * (max - min) + min;
-    }
-
-    /**
-     * Safely checks if given object/valiable is null or undefined
-     * @param obj
-     * Variable to be checked
-     * @returns
-     * True if valiable is NULL or UNDEFINED
-     * @ref
-     * https://stackoverflow.com/questions/2559318/how-to-check-for-an-undefined-or-null-variable-in-javascript
-     * try/catch used for undeclared (undefined) instances (See Reference Note 1).  == is NullISH but catch put in just in case
-     */
-    static isNullOrUndefined(obj?: unknown): boolean {
-        try {
-            return obj === null || obj === undefined;
-        } catch {
-            return true;
-        }
-    }
-
-    /**
-     * Safely checks if given object/valiable is null
-     * @param obj
-     * Variable to be checked
-     * @returns
-     * True if valiable is NULL
-     * @ref
-     * https://www.codevscolor.com/javascript-check-object-null-or-undefined
-     */
-    static isNull(obj?: unknown): boolean {
-        return obj === null;
-    }
-
-    /**
-     * Safely checks if given object/valiable is undefined
-     * @param obj
-     * Variable to be checked
-     * @returns
-     * True if valiable is UNDEFINED
-     * @ref
-     * https://www.codevscolor.com/javascript-check-object-null-or-undefined
-     */
-    static isUndefined(obj?: unknown): boolean {
-        return obj === undefined;
-    }
-
-    /**
-     * Safely verifies if given value evaluates to TRUE
-     * @param valueToCheck
-     * Value to be checked
-     * @returns
-     * True if;
-     * - a boolean TRUE
-     * - a string with 'yes', 'y', '1', 'must', 'can', 'on' or 'true'
-     * - a number greater than zero (note -1 will return FALSE)
-     */
-    static isTrue(valueToCheck: boolean | string | number | undefined): boolean {
-        switch (typeof valueToCheck) {
-            case "boolean":
-                return valueToCheck;
-            case "string": {
-                const normalizedValue = valueToCheck.toLowerCase().trim();
-                return (
-                    normalizedValue === "y" ||
-                    normalizedValue === "1" ||
-                    normalizedValue.includes("yes") ||
-                    normalizedValue.includes("positive") ||
-                    normalizedValue.includes("must") ||
-                    normalizedValue.includes("can") ||
-                    normalizedValue.includes("on") ||
-                    normalizedValue.includes("true") ||
-                    normalizedValue == "enabled" ||
-                    normalizedValue == "checked" ||
-                    normalizedValue == "ticked" ||
-                    normalizedValue == "selected" ||
-                    normalizedValue == "expanded"
-                );
-            }
-            case "number": {
-                return valueToCheck > 0;
-            }
-            default:
-                return false;
-        }
-    }
-
-    /**
-     * Gets test data from process env, npm config or Cucumber profile
-     * @param logLevel
-     * When logging detailings of setting, use this Loging Level
-     * @param settingName
-     * Human readable detail of setting
-     * @param sources
-     * Names of setting for process env, npm config and/or cucumber profile
-     * @param scenarioWorld
-     * Instance of Cucumber World if setting could be obtained from Cucumber Profile and optional default value
-     * @returns
-     * Setting data obtains
+     * Resolves a setting value from, in priority order:
+     * 1. A process environment variable
+     * 2. An npm package config variable
+     * 3. A named property within `contextParameters`
+     * 4. A supplied default value
+     *
+     * @param logLevel - Log level used when reporting where the setting was found.
+     * @param settingName - Human-readable name for the setting, used in log messages.
+     * @param sources - Named sources to check:
+     *   - `processEnvName` — Environment variable name.
+     *   - `npmPackageConfigName` — npm package config key.
+     *   - `profileParameterName` — JSONPath into `contextParameters`.
+     *   - `defaultValue` — Fallback if no other source resolves.
+     * @param contextParameters - Optional context parameters used to resolve `profileParameterName`.
+     * @returns The resolved setting value, or `undefined` if no source resolved.
+     * @throws {Error} If `profileParameterName` is given but `contextParameters` is null.
      */
     public static getSetting<returnType>(
         logLevel: LogLevel,
@@ -463,29 +448,28 @@ export class Utils {
     ): returnType | undefined {
         const debugString = `Got setting [${settingName}] from `;
 
-        // Highest priority - Get setting from Process Env variable
+        // Highest priority — process environment variable
         let returnValue: unknown = sources.processEnvName ? process.env[sources.processEnvName] : undefined;
         if (!Utils.isUndefined(returnValue)) {
             Log.writeLine(logLevel, debugString + `env var [${sources.processEnvName}]. Value: <${returnValue as returnType}>`);
             return returnValue as returnType;
         }
 
-        // Next priority - Get setting from NPM Package config variable
+        // Next priority — npm package config variable
         returnValue = sources.npmPackageConfigName ? process.env["npm_package_config_" + sources.npmPackageConfigName] : undefined;
         if (!Utils.isUndefined(returnValue)) {
             Log.writeLine(logLevel, debugString + `npm package config var [${sources.npmPackageConfigName}]. Value: <${returnValue as returnType}>`);
             return returnValue as returnType;
         }
 
-        // If not given a Profile parameter name OR we we dont have EXACTLY 1 instance of the parameter name in the profile
+        // If no profile parameter name given, or it doesn't match exactly one property, fall back to default
         if (
             Utils.isUndefined(sources.profileParameterName) ||
-            (contextParameters && JsonUtils.getMatchingJSONPropertyCount(contextParameters as object, sources.profileParameterName as string)) != 1
+            (contextParameters && JsonUtils.getMatchingJSONPropertyCount(contextParameters as object, sources.profileParameterName as string)) !== 1
         ) {
-            // We return the default value passed in
             returnValue = sources.defaultValue;
             if (Utils.isUndefined(returnValue)) {
-                Log.writeLine(LogLevels.Error, `Unable to determine value for setting [${settingName}].  Returning: <undefined>!`);
+                Log.writeLine(LogLevels.Error, `Unable to determine value for setting [${settingName}]. Returning: <undefined>!`);
                 return undefined;
             } else {
                 Log.writeLine(logLevel, debugString + `default value: <${returnValue as returnType}>`);
@@ -493,7 +477,7 @@ export class Utils {
             }
         }
 
-        // If we HAVE been given a Profile parameter name AND there is exactly 1 instance of the parameter name in the profile we use that...
+        // Profile parameter name given AND exactly one match exists — use it
         if (Utils.isNullOrUndefined(contextParameters)) {
             const errorTxt = `Caller defined Profile parameter [${sources.profileParameterName}] but contextParameters is null!`;
             Log.writeLine(LogLevels.Error, errorTxt);
@@ -506,19 +490,52 @@ export class Utils {
     }
 
     /**
-     * Reset Process ENV vars (Modified using setProcessEnv) back to original values
-     * @see Utils.setProcessEnv()
+     * Sets a process environment variable and saves its original value for later restoration.
+     *
+     * The first time a variable is set, its original value is saved under a prefixed key.
+     * Subsequent sets to the same variable do not overwrite the saved original.
+     * Call {@link resetProcessEnvs} to restore all modified variables.
+     *
+     * @param varName - Name of the environment variable to set.
+     * @param requiredValue - Value to assign.
+     * @note If the variable did not previously exist, it is stored as `"_undefined"` so that
+     *   {@link resetProcessEnvs} knows to delete it rather than restore a blank value.
+     */
+    public static setProcessEnv(varName: string, requiredValue: string): void {
+        Log.writeLine(LogLevels.TestInformation, `Setting env var [${varName}] to '${requiredValue}'`);
+
+        const originalValueKeyName = ENV_VAR_ORIGINAL_PREAMBLE + varName;
+        if (originalValueKeyName in process.env) {
+            Log.writeLine(LogLevels.TestDebug, `Env var [${varName}] has already been set (original value saved) — not overwriting saved original`);
+            Log.writeLine(
+                LogLevels.FrameworkInformation,
+                `Original env var value is saved on first set only, to ensure the pre-test value can be restored.\nSubsequent sets do not overwrite the saved original.`
+            );
+        } else {
+            const oldValue = process.env[varName];
+            // Store "_undefined" if the var didn't previously exist, so resetProcessEnvs knows to delete it
+            process.env[ENV_VAR_ORIGINAL_PREAMBLE + varName] = Utils.isUndefined(oldValue) ? "_undefined" : oldValue;
+        }
+        process.env[varName] = String(requiredValue);
+    }
+
+    /**
+     * Restores all process environment variables that were modified by {@link setProcessEnv}
+     * back to their original values. Variables that did not previously exist are deleted.
+     *
+     * @see {@link setProcessEnv}
+     * @throws {Error} If an error occurs while resetting variables.
      */
     public static resetProcessEnvs() {
         try {
-            Object.entries(process.env).map(([key, value]) => {
-                if (key.startsWith(envVarOriginalPreamble)) {
-                    const varToSet = key.substring(envVarOriginalPreamble.length);
+            Object.entries(process.env).forEach(([key, value]) => {
+                if (key.startsWith(ENV_VAR_ORIGINAL_PREAMBLE)) {
+                    const varToSet = key.substring(ENV_VAR_ORIGINAL_PREAMBLE.length);
                     if (value === "_undefined") {
-                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so deleting [${varToSet}] and deleting [${key}]`);
+                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so deleting [${varToSet}] and [${key}]`);
                         delete process.env[varToSet];
                     } else {
-                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so setting [${varToSet}] to [${value}] and deleting [${key}]`);
+                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so restoring [${varToSet}] to [${value}] and deleting [${key}]`);
                         process.env[varToSet] = value;
                         delete process.env[key];
                     }
@@ -531,54 +548,425 @@ export class Utils {
         }
     }
 
-    /**
-     * Sets process environment variable to required value
-     * @param varName
-     * Process Environment variable name
-     * @param requiredValue
-     * Value to set to
-     * @Alarm_Summary_Bot
-     * When setting env var to a value, old value is stored.  It is reset back when Utils.resetProcessEnvs() is called
-     */
-    public static setProcessEnv(varName: string, requiredValue: string): void {
-        Log.writeLine(LogLevels.TestInformation, `Setting profile env var [${varName}] to '${requiredValue}'`);
+    // ── Object / JSON ─────────────────────────────────────────────────────────
 
-        const OriginalValueKeyName = envVarOriginalPreamble + varName;
-        if (OriginalValueKeyName in process.env) {
-            Log.writeLine(LogLevels.TestDebug, `Env Var [${varName}] has been already been set (and original value saved) so not saving new original value`);
-            Log.writeLine(
-                LogLevels.FrameworkInformation,
-                `Saving of original env var value is intended to ensure pre-test value is saved\nand can be restored.  Therfore, when multiple settings are made only the FIRST causes\na save to be triggered.`
-            );
+    /**
+     * Returns a deep clone of an object or JSON string.
+     * Uses JSON parse/stringify — only JSON-serialisable values are supported.
+     *
+     * @param original - The object or JSON5 string to clone.
+     * @returns A deep clone of `original`.
+     * @throws {Error} If `original` is not valid JSON (JSON5 allowed).
+     */
+    public static clone(original: object | string): object {
+        if (JsonUtils.isJson(original, true)) {
+            return JsonUtils.parse(typeof original === "string" ? original : JSON.stringify(original as object), true);
         } else {
-            const oldValue = process.env[varName];
-            // Note.  If the env var didn't exist in the first place, store as _undefined so that we can delete the env var when resetting env vars back...
-            process.env[envVarOriginalPreamble + varName] = Utils.isUndefined(oldValue) ? "_undefined" : oldValue;
+            const errText = "Object passed in is not valid JSON (JSON5 allowed) so cannot be cloned using JSON";
+            Log.writeLine(LogLevels.Error, errText);
+            throw new Error(errText);
         }
-        process.env[varName] = String(requiredValue);
     }
 
     /**
-     * Pauses execution for the required number of miliseconds
-     * @param periodMS
-     * Number if miliseconds to wait
-     * @returns Promise that resolves when wait expires
+     * Converts a URL glob pattern to an equivalent `RegExp`.
+     *
+     * Supported glob syntax:
+     * - `*` — matches any sequence of non-`/` characters
+     * - `**` — matches any path segment sequence (including `/`)
+     * - `?` — matches any single character
+     * - `{a,b}` — matches either `a` or `b`
+     * - `[...]` — character class, passed through as-is
+     *
+     * @param glob - The glob pattern to convert.
+     * @param options - Optional anchoring flags:
+     *   - `startOfLine` — Anchors the pattern to the start of the string (default: `true`).
+     *   - `endOfLine` — Anchors the pattern to the end of the string (default: `true`).
+     * @returns A `RegExp` equivalent to the given glob.
+     *
+     * @example
+     * Utils.globToRegex("src/**\/*.ts").test("src/foo/bar.ts"); // true
+     */
+    static globToRegex(glob: string, options?: { startOfLine: boolean; endOfLine: boolean }): RegExp {
+        const startOfLine = options?.startOfLine ?? true;
+        const endOfLine = options?.endOfLine ?? true;
+        const charsToEscape = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
+        const regexExpression = startOfLine ? ["^"] : ["^.*"];
+        let inRegexpGroup = false;
+
+        for (let globCharIndex = 0; globCharIndex < glob.length; ++globCharIndex) {
+            const currentGlobChar = glob[globCharIndex];
+
+            if (currentGlobChar === "\\" && globCharIndex + 1 < glob.length) {
+                const nextGlobChar = glob[++globCharIndex];
+                regexExpression.push(charsToEscape.has(nextGlobChar) ? "\\" + nextGlobChar : nextGlobChar);
+                continue;
+            }
+
+            if (currentGlobChar === "*") {
+                const previousGlobChar = glob[globCharIndex - 1];
+                let starCount = 1;
+                while (glob[globCharIndex + 1] === "*") {
+                    starCount++;
+                    globCharIndex++;
+                }
+                const nextGlobChar = glob[globCharIndex + 1];
+                if (starCount > 1 && (previousGlobChar === "/" || previousGlobChar === undefined) && (nextGlobChar === "/" || nextGlobChar === undefined)) {
+                    // eslint-disable-next-line no-useless-escape
+                    regexExpression.push("((?:[^/]*(?:/|$))*)");
+                    globCharIndex++;
+                } else {
+                    regexExpression.push("([^/]*)");
+                }
+                continue;
+            }
+
+            switch (currentGlobChar) {
+                case "?":  regexExpression.push("."); break;
+                case "[":  regexExpression.push("["); break;
+                case "]":  regexExpression.push("]"); break;
+                case "{":  inRegexpGroup = true;  regexExpression.push("("); break;
+                case "}":  inRegexpGroup = false; regexExpression.push(")"); break;
+                case ",":
+                    regexExpression.push(inRegexpGroup ? "|" : "\\" + currentGlobChar);
+                    break;
+                default:
+                    regexExpression.push(charsToEscape.has(currentGlobChar) ? "\\" + currentGlobChar : currentGlobChar);
+            }
+        }
+        regexExpression.push(endOfLine ? "$" : ".*$");
+        return new RegExp(regexExpression.join(""));
+    }
+
+    // ── HTML ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Decodes HTML entities in a string back to their corresponding characters.
+     *
+     * - Named entities (e.g. `&amp;`, `&copy;`) and numeric entities (`&#169;`, `&#x1F44D;`) are decoded.
+     * - Non-breaking space characters (U+00A0) are replaced with regular spaces.
+     * - Literal apostrophes (`'`) are replaced with `&apos;` before decoding for consistent handling.
+     *
+     * @param str - The HTML-encoded string to decode.
+     * @returns The decoded string.
+     * @throws {Error} If `str` is not a string.
+     */
+    static unescapeHTML(str: string): string {
+        Utils.assertType(str, "string", "unescapeHTML", "str");
+        const preProcessed = str.replace(/'/g, "&apos;");
+        return decodeHTML(preProcessed).replace(/\u00A0/g, " ");
+    }
+
+    // ── JWT ───────────────────────────────────────────────────────────────────
+
+    /**
+     * Creates a signed JWT token.
+     *
+     * @param payloadData - The JWT payload as an object or JSON string.
+     * @param signature - The signing secret or private key.
+     * @param options - Signing options: either a partial options object with an optional
+     *   `algorithm` (default `"HS256"`), or a raw JSON string for the JWT header.
+     * @returns A signed Base64 JWT token string.
+     * @throws {Error} If signing fails.
+     */
+    static createJWT(
+        payloadData: string | object,
+        signature: string,
+        options?: Partial<{ algorithm?: string }> | string
+    ): string {
+        let payload: object | string;
+        let optionsJWT: unknown;
+
+        if (typeof options === "string") {
+            Log.writeLine(LogLevels.FrameworkDebug, `Options is a string: [${options}]`);
+            optionsJWT = StringUtils.trimQuotes(options as string);
+        } else {
+            Log.writeLine(LogLevels.FrameworkDebug, `Options not a string:\n${JSON.stringify(options, null, 2)}`);
+            optionsJWT = { algorithm: options?.algorithm ?? "HS256" };
+        }
+
+        if (JsonUtils.isJson(payloadData, true)) {
+            Log.writeLine(LogLevels.FrameworkDebug, `Payload is JSON [${typeof payloadData === "string" ? "string" : "object"}]`);
+            payload = typeof payloadData === "string" ? JsonUtils.parse(payloadData, true) : payloadData;
+        } else {
+            Log.writeLine(LogLevels.Error, `Payload is NOT JSON (may be intended by test): [${payloadData}]`);
+            payload = payloadData;
+        }
+
+        const normalizedSignature = StringUtils.replaceAll(signature, '\\\\n', '\n');
+        Log.writeLine(LogLevels.FrameworkDebug, `Signature: ${normalizedSignature}`);
+
+        const jwtHeader = typeof options === "string" ? { header: JsonUtils.parse(optionsJWT as string, true) } : optionsJWT as object;
+        Log.writeLine(LogLevels.FrameworkDebug, `JWT Sign options:\n${JSON.stringify(jwtHeader, null, 2)}`);
+        try {
+            return jwtSign(payload, normalizedSignature, jwtHeader);
+        } catch (err) {
+            const errText = `Error creating [${typeof options === 'string' ? options : JSON.stringify(options as object)}] JWT token from [${payloadData}] (signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${(err as Error).message}`;
+            Log.writeLine(LogLevels.Error, errText);
+            throw new Error(errText);
+        }
+    }
+
+    /**
+     * Checks whether a string is a structurally valid JWT token.
+     *
+     * @param jwtToken - The token string to validate.
+     * @returns `true` if the token can be decoded, `false` otherwise.
+     */
+    static isValidJWT(jwtToken: string): boolean {
+        try {
+            return !Utils.isUndefined(jwtDecode(jwtToken));
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Decodes and returns the payload of a JWT token as an object.
+     *
+     * @param jwtToken - A valid JWT token string.
+     * @returns The decoded payload as an object.
+     * @throws {Error} If the token cannot be decoded or the payload is not an object.
+     */
+    static getJWTPayload(jwtToken: string): object {
+        try {
+            let payload = jwtDecode(jwtToken, { json: true });
+            payload = Utils.isNull(payload) ? {} : payload;
+            if (typeof payload !== "object") {
+                throw new Error(`Not an object. Is [${typeof payload}]. Expected JSON object.`);
+            }
+            return payload as object;
+        } catch (err) {
+            const errText = `Error getting payload from JWT [${jwtToken ?? "<Undefined>"}]: ${(err as Error).message}`;
+            Log.writeLine(LogLevels.Error, errText);
+            throw new Error(errText);
+        }
+    }
+
+    // ── Process management ────────────────────────────────────────────────────
+
+    /**
+     * Spawns a command as a background process.
+     *
+     * @param command - The command to execute.
+     * @param args - Arguments to pass to the command.
+     * @param options - Optional settings:
+     *   - `logStdout` — Logs stdout at `TestInformation` level (default: `false`).
+     *   - `logStderr` — Logs stderr and process errors at `Error` level (default: `false`).
+     *   - `spawnOptions` — Additional options passed to `child_process.spawn`.
+     * @returns The spawned `ChildProcess`.
+     * @throws {Error} If the process fails to start (PID is `undefined`).
+     */
+    static spawnBackgroundProcess(command: string, args: string[], { logStdout = false, logStderr = false, spawnOptions = undefined }: { logStdout?: boolean, logStderr?: boolean, spawnOptions?: SpawnOptionsWithoutStdio } = {}): ChildProcessWithoutNullStreams {
+        Log.writeLine(LogLevels.TestInformation, `Executing: ${command} ${args.join(' ')}`);
+        const childProcess = spawn(command, args, spawnOptions);
+        if (childProcess?.pid === undefined) {
+            const errText = `Unable to spawn [${command}] with args [${args.join(', ')}] and options [${spawnOptions === undefined ? '' : JSON.stringify(spawnOptions)}] — spawn returned undefined PID`;
+            Log.writeLine(LogLevels.Error, errText);
+            throw new Error(errText);
+        }
+        Log.writeLine(LogLevels.TestInformation, `Started process: PID ${childProcess.pid}`);
+
+        if (logStdout) {
+            childProcess.stdout.on('data', (data) => {
+                Log.writeLine(LogLevels.TestInformation, `Background(stdout): ${data.toString()}`, { suppressAllPreamble: true });
+            });
+        }
+        if (logStderr) {
+            childProcess.stderr.on('data', (data) => {
+                Log.writeLine(LogLevels.TestInformation, `Background(stderr): ${data.toString()}`, { suppressAllPreamble: true });
+            });
+            childProcess.on('error', (err) => {
+                Log.writeLine(LogLevels.Error, `Background process error: ${(err as Error).message}`, { suppressAllPreamble: true });
+            });
+        }
+        return childProcess;
+    }
+
+    /**
+     * Spawns a command as a background process and waits for it to exit, with a timeout.
+     *
+     * @param command - The command to execute.
+     * @param args - Arguments to pass to the command.
+     * @param timeoutSeconds - Maximum time in seconds to wait before forcibly terminating the process.
+     * @param options - Optional settings (same as {@link spawnBackgroundProcess}).
+     * @returns A promise resolving to the process exit code, or `-1` on timeout or error.
+     */
+    static async spawnBackgroundProcessWithTimeout(command: string, args: string[], timeoutSeconds: number, { logStdout = false, logStderr = false, spawnOptions = undefined }: { logStdout?: boolean, logStderr?: boolean, spawnOptions?: SpawnOptionsWithoutStdio } = {}): Promise<number> {
+        return new Promise((resolve) => {
+            const child = Utils.spawnBackgroundProcess(command, args, { logStdout, logStderr, spawnOptions });
+            let exited = false;
+
+            child.on('exit', (code) => {
+                if (!exited) {
+                    Log.writeLine(LogLevels.TestInformation, `Process [${child.pid ?? 'unknown'}] exited. Code: ${code ?? 'undefined!'}`);
+                    exited = true;
+                    clearTimeout(timeout);
+                    resolve(code ?? -1);
+                }
+            });
+
+            child.on('error', (err) => {
+                if (!exited) {
+                    Log.writeLine(LogLevels.Error, `Process [${child.pid ?? 'unknown'}] errored:\n${err ?? 'unknown error'}`);
+                    exited = true;
+                    clearTimeout(timeout);
+                    resolve(-1);
+                }
+            });
+
+            process.on('SIGINT', () => {
+                Log.writeLine(LogLevels.Error, `Caught SIGINT (Ctrl+C) — terminating child process [${child.pid ?? 'unknown'}]...`);
+                Utils.terminateBackgroundProcess(child, { signal: 'SIGINT' });
+            });
+
+            const timeout = setTimeout(() => {
+                if (!exited) {
+                    const errMessage = `Timeout — child process [${child.pid ?? 'unknown'}] did not exit within ${timeoutSeconds} seconds`;
+                    Log.writeLine(LogLevels.Error, errMessage);
+                    exited = true;
+                    Utils.terminateBackgroundProcess(child);
+                    resolve(-1);
+                }
+            }, timeoutSeconds * MS_PER_SECOND);
+        });
+    }
+
+    /**
+     * Executes a shell command and returns its stdout output.
+     *
+     * @param command - The shell command to run.
+     * @returns A promise resolving to the stdout string.
+     * @throws The error or stderr string if the command fails.
+     */
+    static async execCommand(command: string): Promise<string> {
+        return new Promise((resolve, reject) => {
+            Log.writeLine(LogLevels.FrameworkInformation, `Exec command: >> ${command} <<`);
+            exec(command, (error, stdout, stderr) => {
+                if (error || stderr) {
+                    Log.writeLine(LogLevels.FrameworkDebug, `Error thrown so rejecting (${stderr ?? ''}): \n${error?.message ?? 'No error detail!'}`);
+                    reject(error || stderr);
+                } else {
+                    Log.writeLine(LogLevels.FrameworkDebug, `Resolved: >> ${stdout ?? ''} <<`);
+                    resolve(stdout);
+                }
+            });
+        });
+    }
+
+    /**
+     * Checks whether a process with the given PID is currently running.
+     *
+     * @param pid - The process ID to check.
+     * @returns `true` if the process is running (or exists but cannot be signalled), `false` if it does not exist.
+     * @throws Any unexpected error from `process.kill`.
+     */
+    static isProcessRunning(pid: number): boolean {
+        try {
+            process.kill(pid, 0);
+            return true;
+        } catch (err) {
+            if (err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'string') {
+                const error = err as NodeJS.ErrnoException;
+                if (error.code === 'ESRCH') return false;
+                if (error.code === 'EPERM')  return true;
+            }
+            throw err;
+        }
+    }
+
+    /**
+     * Sends a signal to a process and all of its descendants, leaf-first (post-order traversal).
+     *
+     * @param rootPid - PID of the root process to terminate.
+     * @param signal - Signal to send (default: `"SIGKILL"`).
+     */
+    static async killProcessAndDescendants(rootPid: number, signal: NodeJS.Signals = 'SIGKILL'): Promise<void> {
+        type PS = { PID: string; PPID: string; COMMAND: string };
+
+        const children: PS[] = await new Promise((resolve, reject) => {
+            psTree(rootPid, (err, result) => {
+                if (err) return reject(err);
+                resolve([...result]);
+            });
+        });
+
+        const tree = new Map<number, number[]>();
+        for (const proc of children) {
+            const pid = Number(proc.PID);
+            const ppid = Number(proc.PPID);
+            if (!tree.has(ppid)) tree.set(ppid, []);
+            tree.get(ppid)!.push(pid);
+        }
+
+        const killRecursively = (pid: number) => {
+            const childPids = tree.get(pid) ?? [];
+            for (const childPid of childPids) killRecursively(childPid);
+            try {
+                process.kill(pid, signal);
+            } catch (err) {
+                Log.writeLine(LogLevels.Error, `Killing process [${pid}] with [${signal}] threw error (ignoring): ${(err as Error).message}`);
+            }
+        };
+
+        killRecursively(rootPid);
+    }
+
+    /**
+     * Terminates a background process and all its descendants, waiting for the process to close.
+     *
+     * @param backgroundProcess - The process to terminate.
+     * @param options - Optional settings:
+     *   - `signal` — Signal to use (default: `"SIGKILL"`).
+     * @returns A promise resolving to `true` once the process closes, or `false` if no valid process was provided.
+     */
+    static async terminateBackgroundProcess(backgroundProcess: ChildProcessWithoutNullStreams, options: { signal?: string | number } = {}): Promise<boolean> {
+        const signal = (options.signal ?? 'SIGKILL') as NodeJS.Signals;
+
+        if (Utils.isNullOrUndefined(backgroundProcess)) {
+            Log.writeLine(LogLevels.TestInformation, `No background process executing — nothing to terminate`);
+            return false;
+        }
+        if (Utils.isNullOrUndefined(backgroundProcess.pid)) {
+            Log.writeLine(LogLevels.Error, `Background process has no PID — cannot terminate`);
+            return false;
+        }
+
+        const processPid = backgroundProcess.pid!;
+        const promise = new Promise<boolean>((resolve) => {
+            backgroundProcess.on('close', (code, signal) => {
+                Log.writeLine(LogLevels.TestInformation, `Process [${processPid}] closed [Code: ${code ?? '<No Code>'}], Signal: ${signal ?? 'None'}`);
+                resolve(true);
+            });
+        });
+        await this.killProcessAndDescendants(processPid, signal);
+        return promise;
+    }
+
+    // ── Promise utilities ─────────────────────────────────────────────────────
+
+    /**
+     * Pauses execution for the given number of milliseconds.
+     *
+     * @param periodMS - Duration to wait in milliseconds.
+     * @param logIt - When `true`, logs the sleep duration at `FrameworkDebug` level (default: `false`).
+     * @returns A promise that resolves after the given duration.
      */
     static async sleep(periodMS: number, logIt?: boolean) {
         periodMS = Number(periodMS);
-        if (logIt === true) Log.writeLine(LogLevels.FrameworkDebug, `Sleeping for [${periodMS}] miliseconds`);
+        if (logIt === true) Log.writeLine(LogLevels.FrameworkDebug, `Sleeping for [${periodMS}] milliseconds`);
         return new Promise((resolve) => {
             setTimeout(resolve, periodMS);
         });
     }
 
     /**
-     * Pauses nodejs execution, but allows message loop to continue, until a keybaord key is pressed.
-     * Use: await Utils.pause();
-     * WARNING: This will hang the nodejs execution indefinately!!  If used in pipeline for example it could kill Pipeline!!!
-     * @param logOutput
-     * Optional string to write to Log.  If not used no Log data is created
-     * @returns Promise
+     * Pauses Node.js execution until a keyboard key is pressed, while keeping the event loop running.
+     *
+     * @param logOutput - Optional message to write to the log before pausing.
+     * @returns A promise that resolves when a key is pressed.
+     * @warning This hangs indefinitely in non-TTY environments (e.g. CI pipelines).
+     *   In such cases the call is logged and returns immediately.
      */
     static async pause(logOutput?: string): Promise<void> {
         if (logOutput) {
@@ -587,7 +975,7 @@ export class Utils {
         const stdin = process.stdin;
 
         if (!stdin.isTTY) {
-            Log.writeLine(LogLevels.Error, "Stdin is not a TTY. Cannot pause for key press!! Ignoring.....");
+            Log.writeLine(LogLevels.Error, "Stdin is not a TTY — cannot pause for key press. Ignoring.");
             return;
         }
 
@@ -599,571 +987,162 @@ export class Utils {
             };
 
             const onData = (chunk: Buffer) => {
-                Log.writeLine(
-                    LogLevels.TestDebug,
-                    `Input received: ${JSON.stringify(chunk.toString(), null, 2)}`
-                );
+                Log.writeLine(LogLevels.TestDebug, `Input received: ${JSON.stringify(chunk.toString(), null, 2)}`);
                 cleanup();
                 resolve();
             };
 
-            // Flush any buffered input first
+            // Drain any buffered input before attaching the listener
             stdin.resume();
-            while (stdin.read() !== null) {
-                // Empty as draining
-            }
+            while (stdin.read() !== null) { /* draining */ }
             stdin.pause();
 
-            // Attach listener BEFORE enabling flow
             stdin.once("data", onData);
-
             stdin.setRawMode(true);
             stdin.resume();
         });
-
     }
 
     /**
-     * Converts a glob pattern to a regexp
-     * @param glob
-     * URL glob pattern
-     * @returns
-     * Equivalent pattern in regexp...
+     * Wraps a promise with a timeout and tracks it in the outstanding promise count.
+     *
+     * The count is accessible via {@link promiseCount} and can be checked at the end of a
+     * test to verify all promises have settled. Use {@link resetPromiseCount} to clear
+     * the count between tests.
+     *
+     * @param promise - The promise to wrap.
+     * @param options - Optional settings:
+     *   - `timeoutMS` — Timeout in milliseconds. Falls back to {@link defaultPromiseTimeout} if not given.
+     *   - `friendlyName` — Name shown in the timeout error message (defaults to the caller's function name).
+     * @returns A promise that resolves/rejects with the original result, or rejects with a timeout error.
+     * @throws {Error} If no timeout is configured (neither `timeoutMS` nor `defaultPromiseTimeout` is set).
+     * @throws {Error} If `timeoutMS` is negative.
      */
-    static globToRegex(glob: string, options?: { startOfLine: boolean; endOfLine: boolean }): RegExp {
-        // Set of characters to escape in a regexp
-        const startOfLine = options?.startOfLine ?? true;
-        const endOfLine = options?.endOfLine ?? true;
-        const charsToEscape = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
-        const regexExpression = startOfLine ? ["^"] : ["^.*"];
-        let inRegexpGroup = false;
-        for (let globCharIndex = 0; globCharIndex < glob.length; ++globCharIndex) {
-            const currentGlobChar = glob[globCharIndex];
-
-            // If current glob character is a backslash and we are not at the end of the glob
-            // then; if next is a normal char add it to expression with the next char othwise
-            // ignore it and just add the next char
-            if (currentGlobChar === "\\" && globCharIndex + 1 < glob.length) {
-                const nextGlobChar = glob[++globCharIndex];
-                regexExpression.push(charsToEscape.has(nextGlobChar) ? "\\" + nextGlobChar : nextGlobChar);
-                continue;
-            }
-
-            // if current glob character is a star..
-            if (currentGlobChar === "*") {
-                const previousGlobChar = glob[globCharIndex - 1];
-
-                // Count the stars we have...
-                let starCount = 1;
-                while (glob[globCharIndex + 1] === "*") {
-                    starCount++;
-                    globCharIndex++;
-                }
-                const nextGlobChar = glob[globCharIndex + 1];
-
-                // If we have multiple stars and  at start/end of a URI part
-                // encapsulate in a regexp group.  Otherwise not.
-                if (starCount > 1 && (previousGlobChar === "/" || previousGlobChar === undefined) && (nextGlobChar === "/" || nextGlobChar === undefined)) {
-                    // Not so sure a forward slash in regexp shouldn't be escaped.  So overruling
-                    // eslint here....
-                    // eslint-disable-next-line no-useless-escape
-                    regexExpression.push("((?:[^/]*(?:/|$))*)");
-                    globCharIndex++;
-                } else {
-                    regexExpression.push("([^/]*)");
-                }
-                continue;
-            }
-
-            switch (currentGlobChar) {
-                // Single glob wildcard chart
-                case "?":
-                    regexExpression.push(".");
-                    break;
-                // square braces leave as is...
-                case "[":
-                    regexExpression.push("[");
-                    break;
-                case "]":
-                    regexExpression.push("]");
-                    break;
-                // So, in a glob, curley braces equate to a regexp group....
-                case "{":
-                    inRegexpGroup = true;
-                    regexExpression.push("(");
-                    break;
-                case "}":
-                    inRegexpGroup = false;
-                    regexExpression.push(")");
-                    break;
-                // A glob comma in a group is just ORing.  But
-                // if outside, keep it but escape first
-                case ",":
-                    if (inRegexpGroup) {
-                        regexExpression.push("|");
-                        break;
-                    }
-                    regexExpression.push("\\" + currentGlobChar);
-                    break;
-                // Nothing special so use it, escaping if needed....
-                default:
-                    regexExpression.push(charsToEscape.has(currentGlobChar) ? "\\" + currentGlobChar : currentGlobChar);
-            }
-        }
-        // End
-        regexExpression.push(endOfLine ? "$" : ".*$");
-        // Finally join it all up and hope for the best!
-        return new RegExp(regexExpression.join(""));
-    }
-
-    /**
-     * Clones an object if object can be cloned using JSON
-     * @param original: object or valid JSON5 string
-     * Object to be cloned
-     * @returns
-     * Clone of original Object
-     * @throws
-     * Error if original object cannot be cloned using JSON
-     */
-    public static clone(original: object | string): object {
-        if (JsonUtils.isJson(original, true)) {
-            return JsonUtils.parse(typeof original == "string" ? original : JSON.stringify(original as object), true);
-        } else {
-            const errText = "Object passed in is not valid JSON (JSON5 allowed) so cannot be cloned using JSON";
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
-        }
-    }
-
-    /**
-     * Create a valid JWT token
-     * @param payloadData
-     * Payload data
-     * @param signature
-     * Signature to sign with
-     * @param options
-     *   - algorith (default HS256)
-     *     Algorith to use in token generation
-     *   - type (default JWT)
-     *     Token type to create
-     * @returns
-     * Valid Base64 JWT token
-     */
-    static createJWT(
-        payloadData: string | object,
-        signature: string,
-        options?: Partial<{ algorithm?: string }> | string
-    ): string {
-        let payload: object | string;
-
-        let optionsJWT: unknown;
-
-        if (typeof options == "string") {
-            Log.writeLine(LogLevels.FrameworkDebug, `Options is a string: [${options}]`);
-            optionsJWT = StringUtils.trimQuotes(options as string);
-        } else {
-            Log.writeLine(LogLevels.FrameworkDebug, `Options not a string:\n${JSON.stringify(options, null, 2)}`);
-            optionsJWT = { algorithm: options?.algorithm ?? "HS256" };
-        }
-
-        if (JsonUtils.isJson(payloadData, true)) {
-            Log.writeLine(LogLevels.FrameworkDebug, `Payload is JSON [${typeof payloadData == "string" ? "string" : "object"}]`);
-            payload = typeof payloadData == "string" ? JsonUtils.parse(payloadData, true) : payloadData;
-        } else {
-            Log.writeLine(LogLevels.Error, `Payload is NOT JSON (May be intended by test): [${payloadData}]`);
-            payload = payloadData;
-        }
-
-        const normalizedSignature = StringUtils.replaceAll(signature, '\\\\n', '\n');
-        Log.writeLine(LogLevels.FrameworkDebug, `Signature: ${normalizedSignature}`);
-
-        const jwtHeader = typeof options == "string" ? { header: JsonUtils.parse(optionsJWT as string, true) } : optionsJWT as object;
-        Log.writeLine(LogLevels.FrameworkDebug, `JWT Sign options:\n${JSON.stringify(jwtHeader, null, 2)}`);
+    static async timeoutPromise<T>(promise: Promise<T>, options: { timeoutMS?: number, friendlyName?: string } = {}): Promise<T> {
+        Utils._promiseCount++;
+        const operationName = options?.friendlyName ?? (this.inferCallerFunctionName() || "Unknown operation");
         try {
-            return jwtSign(payload, normalizedSignature, jwtHeader);
-        } catch (err) {
-            const errText = `Error creating [${(typeof options == 'string') ?options: JSON.stringify(options as object)
-        }] JWT token from[${ payloadData }](signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${
-            (err as Error).message
-} `;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
-    }
-  }
-
-  /**
-   * Determines if given JWT token is valid
-   * @param jwtToken
-   * JWT token to verify
-   * @returns
-   * true if values, false if invalid
-   */
-  static isValidJWT(jwtToken: string): boolean {
-    try {
-      return !Utils.isUndefined(jwtDecode(jwtToken));
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Returns payload of given JWT as object
-   * @param jwtToken
-   * Valid JWT token
-   * @returns
-   * Payload of JWT token
-   */
-  static getJWTPayload(jwtToken: string): object {
-    try {
-      let payload = jwtDecode(jwtToken, { json: true });
-      payload = Utils.isNull(payload) ? {} : payload;
-      if (typeof payload != "object") {
-        throw new Error(`Not an object.Is[${ typeof payload }]. Expected JSON object.`);
-      }
-      return payload as object;
-    } catch (err) {
-      const errText = `Error getting payload from JWT[${ jwtToken ?? "<Undefined>" }]: ${ (err as Error).message } `;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
-    }
-  }
-
-  /**
-   * Converts HTML entities in a string back to their corresponding characters.
-   *
-   * Specifically:
-   * - Replaces named HTML entities like `& copy; `, ` & amp; `, ` & nbsp; `, etc.
-   * - Handles numeric entities (`&#169; `, ` & #x1F44D; `) correctly.
-   * - Replaces non-breaking space characters (Unicode U+00A0) with `& nbsp; `
-   *   before decoding, for consistent handling.
-   * - Replaces literal apostrophes (`'`) with ` & apos; ` to ensure they are
-   *   interpreted as HTML-safe entities during decoding.
-   *
-   * @param str - The HTML-encoded string to unescape.
-   * @returns The unescaped string with all recognized HTML entities decoded.
-   * @throws {Error} If the input is not a string.
-   */
-  static unescapeHTML(str: string): string {
-    Utils.assertType(str, "string", "unescapeHTML", "str");
-    // Replace non-breaking space char (ASCII 160) with entity
-    const preProcessed = str
-      .replace(/'/g, "&apos;");       // replace apostrophe with entity
-
-    return decodeHTML(preProcessed).replace(/\u00A0/g, " ");
-  }
-
-  /**
-   * Executes given CLI command as a background process
-   * @param command string
-   * Command to execute
-   * @param args string[]
-   * Optional arguments to pass to command
-   */
-  static spawnBackgroundProcess(command: string, args: string[], { logStdout = false, logStderr = false, spawnOptions = undefined }: { logStdout?: boolean, logStderr?: boolean, spawnOptions?: SpawnOptionsWithoutStdio } = {}): ChildProcessWithoutNullStreams {
-    Log.writeLine(LogLevels.TestInformation, `Executing: ${ command } ${ args.join(' ') } `);
-    const childProcess = spawn(command, args, spawnOptions);
-    if (childProcess?.pid === undefined) {
-      const errText = `Unable(spawn returned undefined!) to spawn[${ command }]with args[${ args.join(', ') }]\nand options[${ spawnOptions === undefined ? '' : JSON.stringify(spawnOptions) }]`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
-    }
-    Log.writeLine(LogLevels.TestInformation, `Started process: PID ${ childProcess.pid } `);
-
-    // Capture stdout (normal output)
-    if (logStdout) {
-      childProcess.stdout.on('data', (data) => {
-        Log.writeLine(LogLevels.TestInformation, `Background(stdout): ${ data.toString() } `, { suppressAllPreamble: true });
-      });
-    }
-
-    // Capture stderr (error output)
-    if (logStderr) {
-      childProcess.stderr.on('data', (data) => {
-        Log.writeLine(LogLevels.TestInformation, `Background(stderr): ${ data.toString() } `, { suppressAllPreamble: true });
-      });
-    }
-
-    // Catch any error
-    if (logStderr) {
-      childProcess.on('error', (err) => {
-        Log.writeLine(LogLevels.Error, `Background process error: ${ (err as Error).message } `, { suppressAllPreamble: true });
-      });
-    }
-    return childProcess;
-  }
-
-  static async spawnBackgroundProcessWithTimeout(command: string, args: string[], timeoutSeconds: number, { logStdout = false, logStderr = false, spawnOptions = undefined }: { logStdout?: boolean, logStderr?: boolean, spawnOptions?: SpawnOptionsWithoutStdio } = {}): Promise<number> {
-    return new Promise((resolve) => {
-      //const child = spawn(command, args, { stdio: "inherit" });
-      const child = Utils.spawnBackgroundProcess(command, args, { logStdout: logStdout, logStderr: logStderr, spawnOptions: spawnOptions });
-      let exited = false;
-
-      // Handle process exit
-      child.on('exit', (code) => {
-        if (!exited) {
-          Log.writeLine(
-            LogLevels.TestInformation,
-            `Process[${ child.pid ?? 'unknown' }]exited.Code: ${ code ?? 'undefined!' } `,
-          );
-          exited = true;
-          clearTimeout(timeout);
-          resolve(code ?? -1); // Return exit code or -1 if code is null
+            if (Utils.isNullOrUndefined(options?.timeoutMS) && Utils._defaultPromiseTimeout === 0) {
+                const errText = 'Utils.timeoutPromise: No timeout given and default not set (have you initialised the default timeout?)';
+                Log.writeLine(LogLevels.Error, errText);
+                throw new Error(errText);
+            }
+            const actualTimeout = (Utils.isNullOrUndefined(options?.timeoutMS) ? Utils._defaultPromiseTimeout : options?.timeoutMS) as number;
+            if (actualTimeout < 0) {
+                const errText = `Utils.timeoutPromise: Timeout cannot be negative. Was [${actualTimeout}]`;
+                Log.writeLine(LogLevels.Error, errText);
+                throw new Error(errText);
+            }
+            return this.withTimeout<T>(promise, { timeoutMS: actualTimeout, friendlyName: operationName });
+        } finally {
+            Utils._promiseCount--;
         }
-      });
+    }
 
-      // Handle process error
-      child.on('error', (err) => {
-        if (!exited) {
-          Log.writeLine(
-            LogLevels.Error,
-            `Process[${ child.pid ?? 'unknown' }]errored: \n${ err ?? 'unknown error' } `,
-          );
-          exited = true;
-          clearTimeout(timeout);
-          resolve(-1);
-        }
-      });
+    /**
+     * @deprecated Use {@link timeoutPromise} instead.
+     */
+    static async withTimeoutTracked<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+        return this.withTimeout<T>(promise, { timeoutMS: timeoutMs, friendlyName: this.inferCallerFunctionName() ?? undefined });
+    }
 
-      process.on('SIGINT', () => {
-        Log.writeLine(
-          LogLevels.Error, `Caught SIGINT(Ctrl + C), terminating child process[${ child.pid ?? 'unknown' }]...`);
-        Utils.terminateBackgroundProcess(child, { signal: 'SIGINT' });
-      });
+    // ── Action parsing ────────────────────────────────────────────────────────
 
-      // Timeout logic
-      const timeout = setTimeout(() => {
-        if (!exited) {
-          const errMessage = `Timeout executing child process[${ child.pid ?? 'unknown' }]!Waited ${ timeoutSeconds } seconds`;
-          Log.writeLine(LogLevels.Error, errMessage);
-          exited = true;
-          Utils.terminateBackgroundProcess(child);
-          resolve(-1);
-        }
-      }, (timeoutSeconds * 1000));
-    });
-  }
+    /**
+     * Parses a raw action string into a verb and a parameter map.
+     *
+     * The expected format is `actionName(param1: value1, param2: value2)` where the
+     * parameter block is valid JSON5 without the outer braces. If no parentheses are
+     * present, `parameters` will be an empty map.
+     *
+     * @param rawAction - The raw action string to parse.
+     * @returns A {@link Utils.ActionAndParams} object with `action`, `normalizedAction`, and `parameters`.
+     * @throws {Error} If the parameter block is not valid JSON5.
+     *
+     * @example
+     * Utils.splitActionAndParameters("click(target: '#btn', force: true)");
+     * // => { action: "click", normalizedAction: "click", parameters: Map { "target" => "#btn", "force" => true } }
+     */
+    static splitActionAndParameters(rawAction: string): ActionAndParams {
+        const actionAndParameters = StringUtils.splitVerbAndParameters(rawAction);
+        const normalizedAction = actionAndParameters.verb.toLowerCase().trim();
 
-  static async execCommand(command: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      Log.writeLine(LogLevels.FrameworkInformation, `Exec command: >> ${ command }<< `);
-      exec(command, (error, stdout, stderr) => {
-        if (error || stderr) {
-          Log.writeLine(LogLevels.FrameworkDebug, `Error thrown so rejecting(${ stderr ?? ''}): \n${ error?.message ?? 'No error detail!' } `);
-          reject(error || stderr);
+        if (StringUtils.isBlank(actionAndParameters.parameters)) {
+            return { action: actionAndParameters.verb, normalizedAction, parameters: new Map() };
         } else {
-          Log.writeLine(LogLevels.FrameworkDebug, `Resolved: >> ${ stdout ?? '' }<< `)
-          resolve(stdout);
+            const paramsJSON = "{" + actionAndParameters.parameters + "}";
+            if (JsonUtils.isJson(paramsJSON, true)) {
+                const paramsMap = new Map(Object.entries(JsonUtils.parse(paramsJSON, true)));
+                return { action: actionAndParameters.verb, normalizedAction, parameters: paramsMap };
+            } else {
+                const errText = `Invalid action [${actionAndParameters.verb}] parameter syntax. Expected (param1: <value>, param2: <value2>, ...). Got: (${actionAndParameters.parameters})`;
+                Log.writeLine(LogLevels.Error, errText);
+                throw new Error(errText);
+            }
         }
-      });
-    });
-  }
+    }
 
-  static isProcessRunning(pid: number): boolean {
-    try {
-      process.kill(pid, 0); // Check if the process exists
-      return true;          // No error means the process is running
-    } catch (err) {
-      if (err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'string') {
-        const error = err as NodeJS.ErrnoException;
-        if (error.code === 'ESRCH') {
-          return false;       // Process does not exist
-        } else if (error.code === 'EPERM') {
-          return true;        // Process exists, but no permission to signal
+    // ── Enum helpers ──────────────────────────────────────────────────────────
+
+    /**
+     * Checks whether a value exists as a member of the given enum.
+     *
+     * @param enumType - The enum object to check against.
+     * @param valueToCheck - The value to look for.
+     * @returns `true` if the value is a member of the enum, `false` otherwise.
+     */
+    static checkENUMValueExists(enumType: object, valueToCheck: string) {
+        try {
+            return Object.values(enumType).includes(valueToCheck);
+        } catch {
+            return false;
         }
-      }
-      throw err;              // Re-throw other unexpected errors
-    }
-  }
-
-  static async killProcessAndDescendants(
-    rootPid: number,
-    signal: NodeJS.Signals = 'SIGKILL'
-  ): Promise<void> {
-    type PS = { PID: string; PPID: string; COMMAND: string };
-
-    const children: PS[] = await new Promise((resolve, reject) => {
-      psTree(rootPid, (err, result) => {
-        if (err) return reject(err);
-
-        // Copy into mutable array to satisfy TS
-        resolve([...result]);
-      });
-    });
-
-    // Build parent -> children map
-    const tree = new Map<number, number[]>();
-
-    for (const proc of children) {
-      const pid = Number(proc.PID);
-      const ppid = Number(proc.PPID);
-
-      if (!tree.has(ppid)) tree.set(ppid, []);
-      tree.get(ppid)!.push(pid);
     }
 
-    // Post-order traversal (leaf first)
-    const killRecursively = (pid: number) => {
-      const childPids = tree.get(pid) ?? [];
-      for (const childPid of childPids) killRecursively(childPid);
+    // ── Private helpers ───────────────────────────────────────────────────────
 
-      try { process.kill(pid, signal); } catch (err) {
-        Log.writeLine(LogLevels.Error, `Killing process[${ pid }]with [${ signal }] threw error(Ignoring): ${ (err as Error).message } `)
-      }
-    };
-
-    killRecursively(rootPid);
-  }
-
-  static async terminateBackgroundProcess(backgroundProcess: ChildProcessWithoutNullStreams, options: { signal?: string | number } = {}): Promise<boolean> {
-    const signal = (options.signal ?? 'SIGKILL') as NodeJS.Signals;
-
-    if (Utils.isNullOrUndefined(backgroundProcess)) {
-      Log.writeLine(LogLevels.TestInformation, `No background process executing so no teardown`);
-      return false;
-    }
-    if (Utils.isNullOrUndefined(backgroundProcess.pid)) {
-      Log.writeLine(LogLevels.Error, `Background process has no PID! Cannot terminate`);
-      return false;
-    }
-    const processPid = backgroundProcess.pid!;
-    const promise = new Promise<boolean>((resolve) => {
-      backgroundProcess.on('close', (code, signal) => {
-        Log.writeLine(
-          LogLevels.TestInformation,
-          `Process[${ processPid }]closed[Code: ${ code ?? '<No Code >' }], Signal ${ signal ?? 'No Signal' } `,
-        );
-        resolve(true);
-      });
-    });
-    await this.killProcessAndDescendants(processPid, signal);
-    return promise;
-  }
-
-  static splitActionAndParameters(rawAction: string): Utils.ActionAndParams {
-    const actionAndParameters = StringUtils.splitVerbAndParameters(rawAction);
-    const normalizedAction = actionAndParameters.verb.toLowerCase().trim();
-
-    if (StringUtils.isBlank(actionAndParameters.parameters)) {
-      return { action: actionAndParameters.verb, normalizedAction: normalizedAction, parameters: new Map() };
-    } else {
-      // We have parameters.  Parameters are always JSON (but without the outer {})
-      const paramsJSON = "{" + actionAndParameters.parameters + "}";
-      if (JsonUtils.isJson(paramsJSON, true)) {
-        const paramsMap = new Map(Object.entries(JsonUtils.parse(paramsJSON, true)));
-        return {
-          action: actionAndParameters.verb,
-          normalizedAction: normalizedAction,
-          parameters: paramsMap,
-        };
-      } else {
-        const errText = `Invalid action[${ actionAndParameters.verb }] parameter syntax.Expected(param1: <value>, param2: <value2>etc...).Got: (${ actionAndParameters.parameters })`;
-        Log.writeLine(LogLevels.Error, errText);
-        throw new Error(errText);
-      }
-    }
-  }
-
-
-  /**
-   * Wrap a promise so it is counted and can have a timeout
-   * @param promise
-   * Promise to be wrapped
-   * @param timeoutMS (optional)
-   * Required timeout in mS (if not given settings defined defaultPromiseTimeout used)
-   * @returns
-   * Results of wrapped promise or rejection if timeout
-   */
-  static async timeoutPromise<T>(promise: Promise<T>, options: { timeoutMS?: number, friendlyName?: string } = {}): Promise<T> {
-    Utils._promiseCount++;
-
-    const operationName = options?.friendlyName ?? (this.inferCallerFunctionName() || "Unknown operation");
-
-    try {
-      if (Utils.isNullOrUndefined(options?.timeoutMS) && Utils._defaultPromiseTimeout == 0) {
-        const errText = 'Utils.timeoutPromise: No timeout given and default not set (have you not initialised!?';
-        throw new Error(errText);
-      }
-      const actualTimeout = (Utils.isNullOrUndefined(options?.timeoutMS) ? Utils._defaultPromiseTimeout : options?.timeoutMS) as number;
-      if (actualTimeout < 0) {
-        const errText = `Utils.timeoutPromise: Cannot have a negative timeout!!  Timeout was[${ actualTimeout }]`;
-        throw new Error(errText);
-      }
-      return this.withTimeout<T>(promise, { timeoutMS: actualTimeout, friendlyName: operationName });
-    }
-    finally {
-      Utils._promiseCount--;
+    /**
+     * Converts data to a string suitable for writing to a file:
+     * - JSON strings are normalised (parsed then re-stringified)
+     * - Non-JSON strings are used as-is
+     * - Objects are pretty-printed as JSON
+     */
+    private static serialiseFileData(data: string | object): string {
+        if (typeof data === "string") {
+            return JsonUtils.isJson(data) ? JSON.stringify(JSON.parse(data)) : data;
+        }
+        return JSON.stringify(data, null, 2);
     }
 
-  }
-
-  /**
-   * @deprecated Use timeoutPromise instead
-   */
-  static async withTimeoutTracked<T>(
-    promise: Promise<T>,
-    timeoutMs: number
-  ): Promise<T> {
-    return this.withTimeout<T>(promise, { timeoutMS: timeoutMs, friendlyName: this.inferCallerFunctionName() ?? undefined });
-  }
-
-
-  private static async withTimeout<T>(promise: Promise<T>, options: { timeoutMS?: number, friendlyName?: string } = {}): Promise<T> {
-    return Promise.race([
-      promise,
-      new Promise<T>((_, reject) =>
-        setTimeout(() => reject(new Error(`${ Utils.isNullOrUndefined(options?.friendlyName) ? 'T' : `${options?.friendlyName}: T` }imeout after ${ options?.timeoutMS ?? '0' } ms`)), options?.timeoutMS ?? 0)
-      ),
-    ]);
-  }
-
-
-  /**
-   * Asserts that a value is of the expected type, throwing a logged error if not
-   * @param value
-   * Value to check
-   * @param expectedType
-   * Expected typeof string (e.g. "string", "number")
-   * @param funcName
-   * Name of the calling function, used in the error message
-   * @param paramName
-   * Name of the parameter being checked, used in the error message
-   * @throws
-   * Error if typeof value does not match expectedType
-   */
-  public static assertType<K extends keyof AssertTypeMap>(value: unknown, expectedType: K, funcName: string, paramName: string): asserts value is AssertTypeMap[K] {
-    if (typeof value !== expectedType) {
-      const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
+    private static async withTimeout<T>(promise: Promise<T>, options: { timeoutMS?: number, friendlyName?: string } = {}): Promise<T> {
+        return Promise.race([
+            promise,
+            new Promise<T>((_, reject) =>
+                setTimeout(
+                    () => reject(new Error(`${Utils.isNullOrUndefined(options?.friendlyName) ? 'T' : `${options?.friendlyName}: T`}imeout after ${options?.timeoutMS ?? '0'} ms`)),
+                    options?.timeoutMS ?? 0
+                )
+            ),
+        ]);
     }
-  }
 
-  private static inferCallerFunctionName(): string | null {
-    const error = new Error();
-    const stackLines = error.stack?.split("\n") || [];
-
-    // The 3rd line typically contains the caller (adjust if needed)
-    const callerLine = stackLines[3] || "";
-
-    const match = callerLine.match(/at (.+?) \(/);
-    return match ? match[1] : null;
-  }
-
+    private static inferCallerFunctionName(): string | null {
+        const error = new Error();
+        const stackLines = error.stack?.split("\n") || [];
+        const callerLine = stackLines[3] || "";
+        const match = callerLine.match(/at (.+?) \(/);
+        return match ? match[1] : null;
+    }
 }
 
-export namespace Utils {
-  export interface ActionAndParams {
-    /**
-     * Original non-normaized action verb
-     */
-    action: string,
-    /**
-     * Lowercase and trimmer Action verb
-     */
-    normalizedAction: string,
-    /**
-     * All action parameters passed by caller
-     */
-    parameters: Map<string, unknown>
-  }
+/**
+ * The parsed result of a raw action string, as returned by {@link Utils.splitActionAndParameters}.
+ */
+export interface ActionAndParams {
+    /** Original non-normalized action verb */
+    action: string;
+    /** Lowercase and trimmed action verb */
+    normalizedAction: string;
+    /** All action parameters passed by the caller */
+    parameters: Map<string, unknown>;
 }

@@ -12,4 +12,5 @@ export type {
 
 export { JsonUtils } from "./jsonUtils/jsonUtils";
 export { StringUtils } from "./stringUtils/stringUtils";
-export { Utils, ExistingFileWriteActions, AssertTypeMap } from "./utils/utils";
+export { Utils, ExistingFileWriteActions } from "./utils/utils";
+export type { AssertTypeMap, ActionAndParams } from "./utils/utils";

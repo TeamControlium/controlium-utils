@@ -2,9 +2,7 @@ import json5 from "json5";
 import * as JSONPath from "jsonpath-plus";
 import JSONPointer from "jsonpointer";
 
-import { Log, LogLevels } from "../index";
-import { StringUtils } from "./StringUtils";
-import { Utils } from "./Utils";
+import { Log, LogLevels, StringUtils, Utils } from "../index";
 
 /**
  * JSON utility methods for querying, manipulating, parsing and validating JSON objects.
