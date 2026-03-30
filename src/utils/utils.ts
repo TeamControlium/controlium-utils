@@ -6,10 +6,10 @@ import { decodeHTML } from "entities";
 import { decode as jwtDecode, sign as jwtSign } from "jsonwebtoken";
 import psTree from "ps-tree";
 
-import { Detokeniser } from "./Detokeniser";
-import { JsonUtils } from "./JsonUtils";
+// import { Detokeniser } from "./Detokeniser"; Claude, just masking this out for now...
+import { JsonUtils } from "../index";
 import { Log, LogLevel, LogLevels } from "../index";
-import { StringUtils } from "./StringUtils";
+import { StringUtils } from "../index";
 
 
 //
@@ -37,6 +37,20 @@ export enum ExistingFileWriteActions {
     Append,
     /** Throw an error stating file already exists */
     ThrowError,
+}
+
+/**
+ * Maps typeof string literals to their corresponding TypeScript types.
+ * Used by {@link Utils.assertType} to provide type narrowing after assertion.
+ */
+export interface AssertTypeMap {
+  string: string;
+  number: number;
+  boolean: boolean;
+  object: object;
+  bigint: bigint;
+  symbol: symbol;
+  function: (...args: unknown[]) => unknown;
 }
 
 /**
@@ -265,7 +279,7 @@ export class Utils {
             let contents = this.getFileContentsBuffer(path).toString(encoding);
             Log.writeLine(LogLevels.FrameworkDebug, `Loaded [${contents.length ?? "No data!!??"}] characters`);
             if (detokenise) {
-                contents = Detokeniser.do(contents);
+                // contents = Detokeniser.do(contents); Hey Claude, dont forget.  Masked out for now...
                 Log.writeLine(LogLevels.FrameworkDebug, `After detokenisation [${contents.length ?? "No data!!??"}] characters`);
                 return contents;
             }
@@ -390,7 +404,7 @@ export class Utils {
      * @returns
      * True if;
      * - a boolean TRUE
-     * - a string with ‘yes’, ‘y’, ‘1’, ‘must’, ‘can’, ‘on’ or ‘true’
+     * - a string with 'yes', 'y', '1', 'must', 'can', 'on' or 'true'
      * - a number greater than zero (note -1 will return FALSE)
      */
     static isTrue(valueToCheck: boolean | string | number | undefined): boolean {
@@ -527,7 +541,7 @@ export class Utils {
      * When setting env var to a value, old value is stored.  It is reset back when Utils.resetProcessEnvs() is called
      */
     public static setProcessEnv(varName: string, requiredValue: string): void {
-        Log.writeLine(LogLevels.TestInformation, `Setting profile env var [${varName}] to ’${requiredValue}’`);
+        Log.writeLine(LogLevels.TestInformation, `Setting profile env var [${varName}] to '${requiredValue}'`);
 
         const OriginalValueKeyName = envVarOriginalPreamble + varName;
         if (OriginalValueKeyName in process.env) {
@@ -538,7 +552,7 @@ export class Utils {
             );
         } else {
             const oldValue = process.env[varName];
-            // Note.  If the env var didn’t exist in the first place, store as _undefined so that we can delete the env var when resetting env vars back...
+            // Note.  If the env var didn't exist in the first place, store as _undefined so that we can delete the env var when resetting env vars back...
             process.env[envVarOriginalPreamble + varName] = Utils.isUndefined(oldValue) ? "_undefined" : oldValue;
         }
         process.env[varName] = String(requiredValue);
@@ -650,7 +664,7 @@ export class Utils {
                 // If we have multiple stars and  at start/end of a URI part
                 // encapsulate in a regexp group.  Otherwise not.
                 if (starCount > 1 && (previousGlobChar === "/" || previousGlobChar === undefined) && (nextGlobChar === "/" || nextGlobChar === undefined)) {
-                    // Not so sure a forward slash in regexp shouldn’t be escaped.  So overruling
+                    // Not so sure a forward slash in regexp shouldn't be escaped.  So overruling
                     // eslint here....
                     // eslint-disable-next-line no-useless-escape
                     regexExpression.push("((?:[^/]*(?:/|$))*)");
@@ -760,7 +774,7 @@ export class Utils {
             payload = payloadData;
         }
 
-        const normalizedSignature = StringUtils.replaceAll(signature, ‘\\\\n’, ‘\n’);
+        const normalizedSignature = StringUtils.replaceAll(signature, '\\\\n', '\n');
         Log.writeLine(LogLevels.FrameworkDebug, `Signature: ${normalizedSignature}`);
 
         const jwtHeader = typeof options == "string" ? { header: JsonUtils.parse(optionsJWT as string, true) } : optionsJWT as object;
@@ -768,8 +782,8 @@ export class Utils {
         try {
             return jwtSign(payload, normalizedSignature, jwtHeader);
         } catch (err) {
-            const errText = `Error creating [${(typeof options == ‘string’) ?options: JSON.stringify(options as object)
-        }] JWT token from[${ payloadData }](signature: [${StringUtils.replaceAll(signature, ‘\\\\n’, ‘<NEWLINE>‘)}]): ${
+            const errText = `Error creating [${(typeof options == 'string') ?options: JSON.stringify(options as object)
+        }] JWT token from[${ payloadData }](signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${
             (err as Error).message
 } `;
       Log.writeLine(LogLevels.Error, errText);
@@ -822,7 +836,7 @@ export class Utils {
    * - Handles numeric entities (`&#169; `, ` & #x1F44D; `) correctly.
    * - Replaces non-breaking space characters (Unicode U+00A0) with `& nbsp; `
    *   before decoding, for consistent handling.
-   * - Replaces literal apostrophes (`‘`) with ` & apos; ` to ensure they are
+   * - Replaces literal apostrophes (`'`) with ` & apos; ` to ensure they are
    *   interpreted as HTML-safe entities during decoding.
    *
    * @param str - The HTML-encoded string to unescape.
@@ -830,12 +844,10 @@ export class Utils {
    * @throws {Error} If the input is not a string.
    */
   static unescapeHTML(str: string): string {
-    if (typeof str !== "string") {
-      throw new Error("Error Unescaping HTML - input not a string!");
-    }
+    Utils.assertType(str, "string", "unescapeHTML", "str");
     // Replace non-breaking space char (ASCII 160) with entity
     const preProcessed = str
-      .replace(/‘/g, "&apos;");       // replace apostrophe with entity
+      .replace(/'/g, "&apos;");       // replace apostrophe with entity
 
     return decodeHTML(preProcessed).replace(/\u00A0/g, " ");
   }
@@ -848,10 +860,10 @@ export class Utils {
    * Optional arguments to pass to command
    */
   static spawnBackgroundProcess(command: string, args: string[], { logStdout = false, logStderr = false, spawnOptions = undefined }: { logStdout?: boolean, logStderr?: boolean, spawnOptions?: SpawnOptionsWithoutStdio } = {}): ChildProcessWithoutNullStreams {
-    Log.writeLine(LogLevels.TestInformation, `Executing: ${ command } ${ args.join(’ ‘) } `);
+    Log.writeLine(LogLevels.TestInformation, `Executing: ${ command } ${ args.join(' ') } `);
     const childProcess = spawn(command, args, spawnOptions);
     if (childProcess?.pid === undefined) {
-      const errText = `Unable(spawn returned undefined!) to spawn[${ command }]with args[${ args.join(‘, ‘) }]\nand options[${ spawnOptions === undefined ? ‘’ : JSON.stringify(spawnOptions) }]`;
+      const errText = `Unable(spawn returned undefined!) to spawn[${ command }]with args[${ args.join(', ') }]\nand options[${ spawnOptions === undefined ? '' : JSON.stringify(spawnOptions) }]`;
       Log.writeLine(LogLevels.Error, errText);
       throw new Error(errText);
     }
@@ -859,21 +871,21 @@ export class Utils {
 
     // Capture stdout (normal output)
     if (logStdout) {
-      childProcess.stdout.on(‘data’, (data) => {
+      childProcess.stdout.on('data', (data) => {
         Log.writeLine(LogLevels.TestInformation, `Background(stdout): ${ data.toString() } `, { suppressAllPreamble: true });
       });
     }
 
     // Capture stderr (error output)
     if (logStderr) {
-      childProcess.stderr.on(‘data’, (data) => {
+      childProcess.stderr.on('data', (data) => {
         Log.writeLine(LogLevels.TestInformation, `Background(stderr): ${ data.toString() } `, { suppressAllPreamble: true });
       });
     }
 
     // Catch any error
     if (logStderr) {
-      childProcess.on(‘error’, (err) => {
+      childProcess.on('error', (err) => {
         Log.writeLine(LogLevels.Error, `Background process error: ${ (err as Error).message } `, { suppressAllPreamble: true });
       });
     }
@@ -887,11 +899,11 @@ export class Utils {
       let exited = false;
 
       // Handle process exit
-      child.on(‘exit’, (code) => {
+      child.on('exit', (code) => {
         if (!exited) {
           Log.writeLine(
             LogLevels.TestInformation,
-            `Process[${ child.pid ?? ‘unknown’ }]exited.Code: ${ code ?? ‘undefined!’ } `,
+            `Process[${ child.pid ?? 'unknown' }]exited.Code: ${ code ?? 'undefined!' } `,
           );
           exited = true;
           clearTimeout(timeout);
@@ -900,11 +912,11 @@ export class Utils {
       });
 
       // Handle process error
-      child.on(‘error’, (err) => {
+      child.on('error', (err) => {
         if (!exited) {
           Log.writeLine(
             LogLevels.Error,
-            `Process[${ child.pid ?? ‘unknown’ }]errored: \n${ err ?? ‘unknown error’ } `,
+            `Process[${ child.pid ?? 'unknown' }]errored: \n${ err ?? 'unknown error' } `,
           );
           exited = true;
           clearTimeout(timeout);
@@ -912,16 +924,16 @@ export class Utils {
         }
       });
 
-      process.on(‘SIGINT’, () => {
+      process.on('SIGINT', () => {
         Log.writeLine(
-          LogLevels.Error, `Caught SIGINT(Ctrl + C), terminating child process[${ child.pid ?? ‘unknown’ }]...`);
-        Utils.terminateBackgroundProcess(child, { signal: ‘SIGINT’ });
+          LogLevels.Error, `Caught SIGINT(Ctrl + C), terminating child process[${ child.pid ?? 'unknown' }]...`);
+        Utils.terminateBackgroundProcess(child, { signal: 'SIGINT' });
       });
 
       // Timeout logic
       const timeout = setTimeout(() => {
         if (!exited) {
-          const errMessage = `Timeout executing child process[${ child.pid ?? ‘unknown’ }]!Waited ${ timeoutSeconds } seconds`;
+          const errMessage = `Timeout executing child process[${ child.pid ?? 'unknown' }]!Waited ${ timeoutSeconds } seconds`;
           Log.writeLine(LogLevels.Error, errMessage);
           exited = true;
           Utils.terminateBackgroundProcess(child);
@@ -936,10 +948,10 @@ export class Utils {
       Log.writeLine(LogLevels.FrameworkInformation, `Exec command: >> ${ command }<< `);
       exec(command, (error, stdout, stderr) => {
         if (error || stderr) {
-          Log.writeLine(LogLevels.FrameworkDebug, `Error thrown so rejecting(${ stderr ?? ‘’}): \n${ error?.message ?? ‘No error detail!‘ } `);
+          Log.writeLine(LogLevels.FrameworkDebug, `Error thrown so rejecting(${ stderr ?? ''}): \n${ error?.message ?? 'No error detail!' } `);
           reject(error || stderr);
         } else {
-          Log.writeLine(LogLevels.FrameworkDebug, `Resolved: >> ${ stdout ?? ‘’ }<< `)
+          Log.writeLine(LogLevels.FrameworkDebug, `Resolved: >> ${ stdout ?? '' }<< `)
           resolve(stdout);
         }
       });
@@ -951,11 +963,11 @@ export class Utils {
       process.kill(pid, 0); // Check if the process exists
       return true;          // No error means the process is running
     } catch (err) {
-      if (err instanceof Error && typeof (err as NodeJS.ErrnoException).code === ‘string’) {
+      if (err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'string') {
         const error = err as NodeJS.ErrnoException;
-        if (error.code === ‘ESRCH’) {
+        if (error.code === 'ESRCH') {
           return false;       // Process does not exist
-        } else if (error.code === ‘EPERM’) {
+        } else if (error.code === 'EPERM') {
           return true;        // Process exists, but no permission to signal
         }
       }
@@ -965,7 +977,7 @@ export class Utils {
 
   static async killProcessAndDescendants(
     rootPid: number,
-    signal: NodeJS.Signals = ‘SIGKILL’
+    signal: NodeJS.Signals = 'SIGKILL'
   ): Promise<void> {
     type PS = { PID: string; PPID: string; COMMAND: string };
 
@@ -1003,7 +1015,7 @@ export class Utils {
   }
 
   static async terminateBackgroundProcess(backgroundProcess: ChildProcessWithoutNullStreams, options: { signal?: string | number } = {}): Promise<boolean> {
-    const signal = (options.signal ?? ‘SIGKILL’) as NodeJS.Signals;
+    const signal = (options.signal ?? 'SIGKILL') as NodeJS.Signals;
 
     if (Utils.isNullOrUndefined(backgroundProcess)) {
       Log.writeLine(LogLevels.TestInformation, `No background process executing so no teardown`);
@@ -1015,10 +1027,10 @@ export class Utils {
     }
     const processPid = backgroundProcess.pid!;
     const promise = new Promise<boolean>((resolve) => {
-      backgroundProcess.on(‘close’, (code, signal) => {
+      backgroundProcess.on('close', (code, signal) => {
         Log.writeLine(
           LogLevels.TestInformation,
-          `Process[${ processPid }]closed[Code: ${ code ?? ‘<No Code >’ }], Signal ${ signal ?? ‘No Signal’ } `,
+          `Process[${ processPid }]closed[Code: ${ code ?? '<No Code >' }], Signal ${ signal ?? 'No Signal' } `,
         );
         resolve(true);
       });
@@ -1068,7 +1080,7 @@ export class Utils {
 
     try {
       if (Utils.isNullOrUndefined(options?.timeoutMS) && Utils._defaultPromiseTimeout == 0) {
-        const errText = ‘Utils.timeoutPromise: No timeout given and default not set (have you not initialised!?’;
+        const errText = 'Utils.timeoutPromise: No timeout given and default not set (have you not initialised!?';
         throw new Error(errText);
       }
       const actualTimeout = (Utils.isNullOrUndefined(options?.timeoutMS) ? Utils._defaultPromiseTimeout : options?.timeoutMS) as number;
@@ -1099,11 +1111,32 @@ export class Utils {
     return Promise.race([
       promise,
       new Promise<T>((_, reject) =>
-        setTimeout(() => reject(new Error(`${ Utils.isNullOrUndefined(options?.friendlyName) ? ‘T’ : `${options?.friendlyName}: T` }imeout after ${ options?.timeoutMS ?? ‘0’ } ms`)), options?.timeoutMS ?? 0)
+        setTimeout(() => reject(new Error(`${ Utils.isNullOrUndefined(options?.friendlyName) ? 'T' : `${options?.friendlyName}: T` }imeout after ${ options?.timeoutMS ?? '0' } ms`)), options?.timeoutMS ?? 0)
       ),
     ]);
   }
 
+
+  /**
+   * Asserts that a value is of the expected type, throwing a logged error if not
+   * @param value
+   * Value to check
+   * @param expectedType
+   * Expected typeof string (e.g. "string", "number")
+   * @param funcName
+   * Name of the calling function, used in the error message
+   * @param paramName
+   * Name of the parameter being checked, used in the error message
+   * @throws
+   * Error if typeof value does not match expectedType
+   */
+  public static assertType<K extends keyof AssertTypeMap>(value: unknown, expectedType: K, funcName: string, paramName: string): asserts value is AssertTypeMap[K] {
+    if (typeof value !== expectedType) {
+      const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
+      Log.writeLine(LogLevels.Error, errorText);
+      throw new Error(errorText);
+    }
+  }
 
   private static inferCallerFunctionName(): string | null {
     const error = new Error();

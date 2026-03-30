@@ -1,8 +1,5 @@
-import _ from "lodash";
-
-import { JsonUtils } from "../index";
-import { Log, LogLevels } from "../index";
-import { Utils } from "../index";
+import { JsonUtils, Log, LogLevels } from "../index";
+import { Utils } from "../utils/utils";
 
 /**
  * General String related test-related utilities.
@@ -18,19 +15,11 @@ export class StringUtils {
    * Character to be removed from start and end of string, if present
    */
   public static trimChar(originalString: string, characterToTrim: string): string {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("trimChar", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (typeof characterToTrim != "string") {
-      const errorText = this.buildParameterError("trimChar", "characterToTrim", "string", typeof characterToTrim);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+    Utils.assertType(originalString, "string", "trimChar", "originalString");
+    Utils.assertType(characterToTrim, "string", "trimChar", "characterToTrim");
 
     // Check we have only been given a single char to trim.  Bomb if not.
-    if (characterToTrim.length != 1) {
+    if (characterToTrim.length !== 1) {
       const error = `characterToTrim (${characterToTrim}) must be a single character!`;
       Log.writeLine(LogLevels.Error, ` ${error}`);
       throw new Error(error);
@@ -48,16 +37,9 @@ export class StringUtils {
    * String to be trimmed
    */
   public static trimQuotes(originalString: string): string {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("trimQuotes", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+    Utils.assertType(originalString, "string", "trimQuotes", "originalString");
 
-    if (Utils.isNullOrUndefined(originalString)) {
-      return originalString;
-    }
-    let trimmedString = originalString.toString();
+    let trimmedString = originalString;
 
     if ((trimmedString.startsWith("'") && trimmedString.endsWith("'")) || (trimmedString.startsWith('"') && trimmedString.endsWith('"'))) {
       trimmedString = trimmedString.substring(1, trimmedString.length - 1);
@@ -75,22 +57,15 @@ export class StringUtils {
    * Boolean true is alpha, otherwise false
    */
   public static isAlpha(stringToCheck: string, indexZeroBased = 0) {
-    if (typeof stringToCheck != "string") {
-      const errorText = this.buildParameterError("isAlpha", "stringToCheck", "string", typeof stringToCheck);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (typeof indexZeroBased != "number") {
-      const errorText = this.buildParameterError("isAlpha", "indexZeroBased", "number", typeof indexZeroBased);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+    Utils.assertType(stringToCheck, "string", "isAlpha", "stringToCheck");
+    Utils.assertType(indexZeroBased, "number", "isAlpha", "indexZeroBased");
+
     if (stringToCheck.length - 1 < indexZeroBased) {
       const errorText = `Cannot check if char [${indexZeroBased} (Zero based)] isAlpha as length of stringToCheck is only ${stringToCheck.length} characters long!`;
       Log.writeLine(LogLevels.Error, errorText);
       throw new Error(errorText);
     }
-    return stringToCheck.charAt(indexZeroBased).toLowerCase() != stringToCheck.charAt(indexZeroBased).toUpperCase();
+    return stringToCheck.charAt(indexZeroBased).toLowerCase() !== stringToCheck.charAt(indexZeroBased).toUpperCase();
   }
 
   /**
@@ -100,12 +75,9 @@ export class StringUtils {
    * @returns
    * originalString with first character capitalised
    */
-  public static capitaliseFirstChararacter(originalString: string, searchFirstAlpha = false): string {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("capitaliseFirstChararacter", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+  public static capitaliseFirstCharacter(originalString: string, searchFirstAlpha = false): string {
+    Utils.assertType(originalString, "string", "capitaliseFirstCharacter", "originalString");
+
     if (searchFirstAlpha) {
       const asArray = originalString.split("");
       asArray.find((item, index) => {
@@ -132,22 +104,11 @@ export class StringUtils {
    * A value used to limit the number of elements returned in the array. Last element contains rest of string.
    */
   public static splitRemaining(originalString: string, separator: string, limit: number,doNotSeparateInQuotes = false): string[] {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("splitRemaining", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (typeof separator != "string") {
-      const errorText = this.buildParameterError("splitRemaining", "separator", "string", typeof separator);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (typeof limit != "number") {
-      const errorText = this.buildParameterError("splitRemaining", "limit", "number", typeof limit);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (separator.length == 1 && limit > 0) {
+    Utils.assertType(originalString, "string", "splitRemaining", "originalString");
+    Utils.assertType(separator, "string", "splitRemaining", "separator");
+    Utils.assertType(limit, "number", "splitRemaining", "limit");
+
+    if (separator.length === 1 && limit > 0) {
       const allParts = StringUtils.split(originalString,separator,doNotSeparateInQuotes);
       const partsToMax = allParts.slice(0, limit - 1);
       const partsAfterMax = allParts.slice(limit - 1);
@@ -155,7 +116,7 @@ export class StringUtils {
     } else {
       const error = `Seperator [Length was ${separator.length}] must be single character and limit [Limit was ${limit}] greater than 0.`;
       Log.writeLine(LogLevels.Error, error);
-      throw error;
+      throw new Error(error);
     }
   }
 
@@ -169,23 +130,12 @@ export class StringUtils {
    * A value used to limit the number of elements returned in the array. First element contains start of string.
    */
   public static splitLeading(originalString: string, separator: string, limit: number,doNotSeparateInQuotes = false): string[] {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("splitLeading", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (typeof separator != "string") {
-      const errorText = this.buildParameterError("splitLeading", "separator", "string", typeof separator);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (typeof limit != "number") {
-      const errorText = this.buildParameterError("splitLeading", "limit", "number", typeof limit);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+    Utils.assertType(originalString, "string", "splitLeading", "originalString");
+    Utils.assertType(separator, "string", "splitLeading", "separator");
+    Utils.assertType(limit, "number", "splitLeading", "limit");
+
     const realLimit = limit > originalString.length ? originalString.length : limit;
-    if (separator.length == 1 && limit > 0) {
+    if (separator.length === 1 && limit > 0) {
       const allParts = StringUtils.split(originalString,separator,doNotSeparateInQuotes);
       const partsToMax = allParts.slice(0, allParts.length - realLimit + 1);
       const partsAfterMax = allParts.slice(allParts.length - realLimit + 1, allParts.length);
@@ -193,7 +143,7 @@ export class StringUtils {
     } else {
       const error = `Seperator [Length was ${separator.length}] must be single character and limit [Limit was ${limit}] greater than 0.`;
       Log.writeLine(LogLevels.Error, error);
-      throw error;
+      throw new Error(error);
     }
   }
 
@@ -209,28 +159,21 @@ export class StringUtils {
    * Array of original string
    */
   public static split(originalString: string, separator: string, doNotSeparateInQuotes = true):Array<string> {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("splitLeading", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (typeof separator != "string") {
-      const errorText = this.buildParameterError("splitLeading", "separator", "string", typeof separator);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
-    if (separator.length == 1) {
+    Utils.assertType(originalString, "string", "split", "originalString");
+    Utils.assertType(separator, "string", "split", "separator");
+
+    if (separator.length === 1) {
       if (doNotSeparateInQuotes) {
         const result = originalString.match(/\\?.|^$/g)?.reduce(
           (workingObject, currentChar) => {
             if (['"', "'"].includes(currentChar)) {
-              if (workingObject.inQuote == "") {
+              if (workingObject.inQuote === "") {
                 workingObject.inQuote = currentChar;
-              } else if (workingObject.inQuote == currentChar) {
+              } else if (workingObject.inQuote === currentChar) {
                 workingObject.inQuote = "";
               }
             }
-            if (workingObject.inQuote == "" && currentChar === separator) {
+            if (workingObject.inQuote === "" && currentChar === separator) {
                 workingObject.array[workingObject.array.length - 1] = StringUtils.trimQuotes(workingObject.array[workingObject.array.length - 1]);
               workingObject.array.push("");
             } else {
@@ -248,7 +191,7 @@ export class StringUtils {
     } else {
       const error = `Seperator [Length was ${separator.length}] must be single character.`;
       Log.writeLine(LogLevels.Error, error);
-      throw error;
+      throw new Error(error);
     }
   }
 
@@ -297,11 +240,7 @@ export class StringUtils {
    * String to remove non-alphanumerics from
    */
   public static removeNonAlphaNumeric(originalString: string): string {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("removeNonAlphaNumeric", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+    Utils.assertType(originalString, "string", "removeNonAlphaNumeric", "originalString");
     return originalString.replace(/[^a-zA-Z0-9]+/g, "");
   }
 
@@ -311,11 +250,7 @@ export class StringUtils {
    * String to remove whitespace from
    */
   public static removeWhitespace(originalString: string): string {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("removeWhitespace", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+    Utils.assertType(originalString, "string", "removeWhitespace", "originalString");
     return originalString.replace(/\s+/g, "");
   }
 
@@ -327,11 +262,7 @@ export class StringUtils {
    * Original string HTML encoded.
    */
   static encodeHTML(originalString: string): string {
-    if (typeof originalString != "string") {
-      const errorText = this.buildParameterError("encodeHTML", "originalString", "string", typeof originalString);
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
-    }
+    Utils.assertType(originalString, "string", "encodeHTML", "originalString");
     return originalString.replace(
       /[&<>'"]/g,
       (tag) =>
@@ -366,19 +297,15 @@ export class StringUtils {
     return original.replace(escapedRegExp, replaceValue);
   }
 
-    private static buildParameterError(func: string, paramName: string, requiredType: string, isType: string): string {
-        return `Cannot ${func} as [${paramName}] not '${requiredType}' type.  Is [${isType}]`;
-    }
+  /**
+   * Checks if a string is blank
+   * @param text
+   * String to be verified for blank
+   * @returns
+   * Boolean true is empty or with blankspaces, otherwise false
+   */
+  static isBlank(text:string):boolean{
+    return Utils.isNullOrUndefined(text) || text.trim().length === 0;
+  }
 
-    /**
-     * Checks if a string is blank
-     * @param text
-     * String to be verified for blank
-     * @returns
-     * Boolean true is empty or with blankspaces, otherwise false
-     */
-    static isBlank(text:string):boolean{
-        const isNullOrUndefined:boolean = Utils.isNullOrUndefined(text)
-        return isNullOrUndefined?isNullOrUndefined: _.isEmpty(_.trim(text))
-    }
 }

@@ -11,4 +11,5 @@ export type {
 } from "./logger/types";
 
 export { JsonUtils } from "./jsonUtils/jsonUtils";
-export { Utils, ExistingFileWriteActions } from "./utils/utils";
+export { StringUtils } from "./stringUtils/stringUtils";
+export { Utils, ExistingFileWriteActions, AssertTypeMap } from "./utils/utils";
