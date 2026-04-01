@@ -1,6 +1,6 @@
 {
   "name": "@controlium/utils",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.1",
   "description": "Shared utilities for Controlium-based projects",
   "type": "module",
   "author": "Team Controllium contributors",
@@ -8,6 +8,10 @@
     "Mat Walker <v-mwalk@alexview.com>"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TeamControlium/controlium-utils"
+  },
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
