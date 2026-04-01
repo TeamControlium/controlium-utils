@@ -14,10 +14,10 @@ import { StringUtils } from "../index";
 // ─── Module-level constants ───────────────────────────────────────────────────
 
 /** Milliseconds in one second. */
-const MS_PER_SECOND = 1000;
+const MS_PER_SECOND = 1_000;
 
 /** Milliseconds in one day. */
-const MS_PER_DAY = 86400000;
+const MS_PER_DAY = 86_400_000;
 
 /**
  * Prefix used when storing the original value of a modified environment variable.
