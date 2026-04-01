@@ -1,6 +1,6 @@
 {
   "name": "@controlium/utils",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared utilities for Controlium-based projects",
   "type": "module",
   "author": "Team Controllium contributors",
