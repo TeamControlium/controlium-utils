@@ -4,7 +4,7 @@ import { Utils } from "../utils/utils";
 /**
  * General String related test-related utilities.
  * @note
- * This were originally written as String extensions.  However, not sure they would pass EA code-check validates and so re-written as functions.
+ * Originally written as String extensions, re-written as static functions for broader compatibility.
  */
 export class StringUtils {
   /**
