@@ -656,7 +656,7 @@ export class Logger {
     const stackObj: unknown = {};
     Error.captureStackTrace(stackObj as object, this.writeLine);
     const stack = (stackObj as Error)?.stack ?? "[Unknown]";
-    const callingMethodDetails = this.callingMethodDetails(stack);
+    const callingMethodDetails = this.callingMethodDetails(stack, options?.stackOffset ?? 0);
 
     const maxLines =
       options?.maxLines ?? (this.options.writeLine.maxLines as number);
@@ -950,7 +950,7 @@ export class Logger {
     }
   }
 
-  private static callingMethodDetails(methodBase: string): string {
+  private static callingMethodDetails(methodBase: string, stackOffset = 0): string {
     let methodName = "<Unknown>";
     let typeName = "";
     if (methodBase) {
@@ -962,7 +962,9 @@ export class Logger {
           .findIndex((item) => !item.includes(LOGGER_STACK_FRAME_MARKER));
         indexOfFirstNonLogLine =
           indexOfFirstNonLogLine === -1 ? 1 : indexOfFirstNonLogLine + 1;
-        methodName = methodBaseLines[indexOfFirstNonLogLine]
+        const safeOffset = Math.max(0, stackOffset);
+        const targetIndex = Math.min(indexOfFirstNonLogLine + safeOffset, methodBaseLines.length - 1);
+        methodName = methodBaseLines[targetIndex]
           .replace(/\s\s+/g, " ")
           .trim();
         if (methodName.startsWith("at ")) {
