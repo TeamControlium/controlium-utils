@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { JSONPath } from 'jsonpath-plus';
 import { Utils } from '../utils/utils';
 import { Log, LogLevels } from '..';
@@ -20,42 +21,94 @@ import { Log, LogLevels } from '..';
  * All methods are static — no instantiation is required. Call {@link Mock.reset}
  * in `beforeEach` / `afterEach` hooks to start each test with a clean slate.
  *
+ * ---
+ *
+ * ### Local mode (default)
+ *
+ * `Mock` runs in the same process as the test framework. When a `passthrough`
+ * listener matches, `Mock` fetches the real response itself and returns it
+ * directly. {@link Mock.intercept} always resolves to a {@link Mock.InterceptResult}
+ * with `action: 'fulfill'` or `action: 'block'`.
+ *
+ * ### Delegate mode
+ *
+ * Enable with `Mock.delegateMode = true` when `Mock` is hosted in a remote
+ * server (e.g. a mock proxy) and the caller — not `Mock` — is better placed
+ * to perform the real network fetch. In this mode, when a `passthrough`
+ * listener matches, {@link Mock.intercept} returns `action: 'passthrough'`
+ * plus a `correlationId`. The caller fetches the real response and reports it
+ * back via {@link Mock.completePassthrough}, allowing `Mock` to record the
+ * full transaction. Use {@link Mock.getPendingTransactions} to detect
+ * passthrough calls that were never completed.
+ *
  * @example
  * ```typescript
- * // In a beforeEach hook
+ * // Local mode — Playwright adapter
  * Mock.reset();
- * Mock.addListener('static-assets',
- *   ['$[?(@.url =~ /\\.(css|js)$/)]'],
- *   'passthrough'
- * );
  * Mock.addListener('get-users',
  *   ['$[?(@.url =~ /api\\/users/)]', '$[?(@.method == "GET")]'],
  *   { status: 200, body: [{ id: 1, name: 'Alice' }] }
  * );
  *
- * // Wire into Playwright
  * await page.route('**\/*', async (route) => {
- *   const req = route.request();
  *   const result = await Mock.intercept({
- *     url: req.url(), method: req.method(),
- *     headers: await req.allHeaders(), body: req.postDataJSON(),
+ *     url: route.request().url(),
+ *     method: route.request().method(),
+ *     headers: await route.request().allHeaders(),
  *   });
- *   result
- *     ? await route.fulfill({ status: result.status, body: JSON.stringify(result.body) })
- *     : await route.abort();
+ *   if (result.action === 'fulfill') {
+ *     await route.fulfill({ status: result.response.status });
+ *   } else {
+ *     await route.abort();
+ *   }
  * });
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Delegate mode — remote mock server
+ * Mock.delegateMode = true;
+ *
+ * // In the interceptor callback:
+ * const result = await Mock.intercept(request);
+ * if (result.action === 'passthrough') {
+ *   const real = await myFetch(request);
+ *   Mock.completePassthrough(result.correlationId, real);
+ *   return real;
+ * }
  * ```
  */
 export class Mock {
   private static listeners = new Map<string, Mock.Listener>();
   private static transactions: Mock.Transaction[] = [];
   private static transactionCounter = 0;
+  private static pendingTransactions = new Map<string, Mock.PendingTransaction>();
+  private static _delegateMode = false;
 
-  private static throwError(funcName: string, message: string): never {
-    const errorText = `Mock.${funcName}: ${message}`;
-    Log.writeLine(LogLevels.Error, errorText, { stackOffset: 1 });
-    throw new Error(errorText);
+  // ── Configuration ──────────────────────────────────────────────────────────
+
+  /**
+   * When `true`, passthrough requests are delegated to the caller rather than
+   * fetched by `Mock` itself. {@link Mock.intercept} returns
+   * `action: 'passthrough'` with a `correlationId` for the caller to use when
+   * reporting the real response back via {@link Mock.completePassthrough}.
+   *
+   * Defaults to `false` (local mode — `Mock` fetches passthroughs itself).
+   *
+   * @example
+   * Mock.delegateMode = true;
+   */
+  static set delegateMode(value: boolean) {
+    Utils.assertType(value, 'boolean', 'delegateMode', 'value');
+    Log.writeLine(LogLevels.FrameworkInformation, `Mock: delegate mode ${value ? 'enabled' : 'disabled'}`);
+    Mock._delegateMode = value;
   }
+
+  static get delegateMode(): boolean {
+    return Mock._delegateMode;
+  }
+
+  // ── Listener management ────────────────────────────────────────────────────
 
   /**
    * Registers a named listener that matches intercepted requests and defines
@@ -77,9 +130,9 @@ export class Mock {
    *   time. Must be a non-empty array of non-empty strings.
    *
    * @param action - What to do when this listener matches:
-   *   - `'block'` — abort the request and return `null` to the caller.
-   *   - `'passthrough'` — forward the request to the real endpoint, store the
-   *     real response, and return it to the caller.
+   *   - `'block'` — abort the request and return `action: 'block'` to the caller.
+   *   - `'passthrough'` — forward the request to the real endpoint (or delegate
+   *     to the caller in {@link Mock.delegateMode}) and return the real response.
    *   - {@link Mock.Response} — return the supplied response object directly
    *     without touching the network. `status` must be a valid HTTP status
    *     code (100–599).
@@ -104,11 +157,9 @@ export class Mock {
    * );
    */
   static addListener(name: string, matchers: string[], action: Mock.ListenerAction, delayMs = 0): void {
-    // Validate name
     Utils.assertType(name, 'string', 'addListener', 'name');
     if (name.trim().length === 0) Mock.throwError('addListener', '[name] must not be empty');
 
-    // Validate matchers
     if (!Array.isArray(matchers)) {
       Mock.throwError('addListener', `[matchers] must be a string array, got [${typeof matchers}]`);
     }
@@ -129,7 +180,6 @@ export class Mock {
       }
     });
 
-    // Validate action
     if (action !== 'block' && action !== 'passthrough') {
       if (action === null || typeof action !== 'object' || Array.isArray(action)) {
         Mock.throwError('addListener', `[action] must be 'block', 'passthrough', or a Mock.Response object, got [${action === null ? 'null' : typeof action}]`);
@@ -143,7 +193,6 @@ export class Mock {
       }
     }
 
-    // Validate delayMs
     Utils.assertType(delayMs, 'number', 'addListener', 'delayMs');
     if (!Number.isFinite(delayMs) || delayMs < 0) {
       Mock.throwError('addListener', `[delayMs] must be a non-negative finite number, got [${delayMs}]`);
@@ -170,7 +219,6 @@ export class Mock {
    * call is a no-op.
    *
    * @param name - Name of the listener to remove. Must be a non-empty string.
-   *
    * @throws {Error} If `name` is not a non-empty string.
    *
    * @example
@@ -190,106 +238,54 @@ export class Mock {
   /**
    * Removes all registered listeners.
    *
-   * Transaction history is unaffected. Use {@link Mock.reset} to clear both
-   * listeners and transactions in a single call.
-   *
-   * @example
-   * Mock.clearListeners();
+   * Transaction history and pending transactions are unaffected. Use
+   * {@link Mock.reset} to clear everything in a single call.
    */
   static clearListeners(): void {
     Log.writeLine(LogLevels.FrameworkInformation, `Mock: Clear all listeners (${Mock.listeners.size} removed)`);
     Mock.listeners.clear();
   }
 
-  /**
-   * Returns all recorded transactions in chronological order.
-   *
-   * The returned array is read-only. Each entry records the request, the
-   * response (if any), which listener matched, and the outcome type. Entries
-   * accumulate across calls until {@link Mock.clearTransactions} or
-   * {@link Mock.reset} is called.
-   *
-   * @returns A read-only array of {@link Mock.Transaction} objects.
-   *
-   * @example
-   * const blocked = Mock.getTransactions().filter(t => t.type === 'blocked');
-   */
-  static getTransactions(): readonly Mock.Transaction[] {
-    return Mock.transactions;
-  }
+  // ── Intercept ──────────────────────────────────────────────────────────────
 
   /**
-   * Clears all recorded transactions and resets the transaction counter.
+   * Processes an intercepted HTTP request and returns a {@link Mock.InterceptResult}
+   * describing what the caller should do.
    *
-   * Registered listeners are unaffected. Use {@link Mock.reset} to clear both
-   * listeners and transactions in a single call.
+   * Listeners are evaluated in registration order; the first full match wins.
+   * Every request — matched or not — is recorded in the transaction history.
+   * If the matching listener has a `delayMs`, the delay is applied before the
+   * result is returned.
    *
-   * @example
-   * Mock.clearTransactions();
-   */
-  static clearTransactions(): void {
-    Log.writeLine(LogLevels.FrameworkInformation, `Mock: Clear transaction history (${Mock.transactions.length} removed)`);
-    Mock.transactions = [];
-    Mock.transactionCounter = 0;
-  }
-
-  /**
-   * Clears all registered listeners and all recorded transactions.
-   *
-   * Call this in `beforeEach` or `afterEach` hooks to ensure each test starts
-   * with a completely clean state.
-   *
-   * @example
-   * beforeEach(() => {
-   *   Mock.reset();
-   *   Mock.addListener('static-assets', [...], 'passthrough');
-   * });
-   */
-  static reset(): void {
-    Log.writeLine(LogLevels.FrameworkInformation, `Mock: Reset (${Mock.listeners.size} listeners, ${Mock.transactions.length} transactions cleared)`);
-    Mock.listeners.clear();
-    Mock.transactions = [];
-    Mock.transactionCounter = 0;
-  }
-
-  /**
-   * Processes an intercepted HTTP request and returns the appropriate response.
-   *
-   * This is the method your framework adapter calls for every request
-   * intercepted from the AUT. `Mock` evaluates the request against registered
-   * listeners in order and acts on the first match:
-   *
-   * | Outcome | Return value |
-   * |---|---|
-   * | Matched → mock response | The configured {@link Mock.Response} |
-   * | Matched → passthrough | The real response fetched from the endpoint |
-   * | Matched → block | `null` |
-   * | No match (unmatched) | `null` |
-   *
-   * Every request is recorded in the transaction history regardless of outcome.
-   * If a `delayMs` was set on the matching listener, the delay is applied
-   * before the response is returned.
+   * | Situation | `action` returned | Transaction type |
+   * |---|---|---|
+   * | Matched → mock response | `'fulfill'` | `'mocked'` |
+   * | Matched → passthrough, local mode | `'fulfill'` | `'passthrough'` |
+   * | Matched → passthrough, delegate mode | `'passthrough'` | pending until {@link Mock.completePassthrough} |
+   * | Matched → block | `'block'` | `'blocked'` |
+   * | No listener matched | `'block'` | `'unmatched'` |
    *
    * @param request - The intercepted request. Must be a non-null object with
    *   non-empty `url` and `method` string properties.
    *
-   * @returns A promise resolving to a {@link Mock.Response} to return to the
-   *   AUT, or `null` to abort/block the request.
+   * @returns A promise resolving to a {@link Mock.InterceptResult}.
    *
    * @throws {Error} If `request` fails validation.
    *
    * @example
-   * // Playwright adapter
-   * await page.route('**\/*', async (route) => {
-   *   const result = await Mock.intercept({
-   *     url: route.request().url(),
-   *     method: route.request().method(),
-   *     headers: await route.request().allHeaders(),
-   *   });
-   *   result ? await route.fulfill({ status: result.status }) : await route.abort();
-   * });
+   * const result = await Mock.intercept(request);
+   * if (result.action === 'fulfill') {
+   *   respondWith(result.response);
+   * } else if (result.action === 'passthrough') {
+   *   // delegate mode only
+   *   const real = await fetch(request.url);
+   *   Mock.completePassthrough(result.correlationId, real);
+   *   respondWith(real);
+   * } else {
+   *   abortRequest();
+   * }
    */
-  static async intercept(request: Mock.Request): Promise<Mock.Response | null> {
+  static async intercept(request: Mock.Request): Promise<Mock.InterceptResult> {
     if (request === null || request === undefined || typeof request !== 'object' || Array.isArray(request)) {
       Mock.throwError('intercept', `[request] must be a non-null object, got [${request === null ? 'null' : typeof request}]`);
     }
@@ -310,7 +306,7 @@ export class Mock {
     if (!listener) {
       Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: no listener matched — blocking`);
       Mock.record({ type: 'unmatched', request });
-      return null;
+      return { action: 'block' };
     }
 
     Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: matched listener <${listener.name}>`);
@@ -323,20 +319,161 @@ export class Mock {
     if (listener.action === 'block') {
       Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: blocking request`);
       Mock.record({ type: 'blocked', listenerName: listener.name, request });
-      return null;
+      return { action: 'block' };
     }
 
     if (listener.action === 'passthrough') {
+      if (Mock._delegateMode) {
+        const correlationId = randomUUID();
+        Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: delegating passthrough (correlationId: ${correlationId})`);
+        Mock.pendingTransactions.set(correlationId, {
+          correlationId,
+          timestamp: new Date(),
+          listenerName: listener.name,
+          request,
+        });
+        return { action: 'passthrough', correlationId };
+      }
       Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: passing through to real endpoint`);
       const response = await Mock.fetchReal(request);
       Mock.record({ type: 'passthrough', listenerName: listener.name, request, response });
-      return response;
+      return { action: 'fulfill', response };
     }
 
     const response = listener.action as Mock.Response;
     Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: returning mocked response (status ${response.status})`);
     Mock.record({ type: 'mocked', listenerName: listener.name, request, response });
-    return response;
+    return { action: 'fulfill', response };
+  }
+
+  /**
+   * Completes a delegated passthrough by supplying the real response the caller
+   * fetched. Records the full transaction and removes the pending entry.
+   *
+   * Only relevant when {@link Mock.delegateMode} is `true`. The `correlationId`
+   * must match one previously returned by {@link Mock.intercept}.
+   *
+   * @param correlationId - The UUID returned in the `action: 'passthrough'`
+   *   result from {@link Mock.intercept}. Must be a non-empty string that
+   *   matches a pending transaction.
+   *
+   * @param response - The real response the caller received from the endpoint.
+   *   Must be a valid {@link Mock.Response} with a status code of 100–599.
+   *
+   * @throws {Error} If `correlationId` is invalid, unknown, or already completed.
+   * @throws {Error} If `response` fails validation.
+   *
+   * @example
+   * const result = await Mock.intercept(request);
+   * if (result.action === 'passthrough') {
+   *   const real = await myFetch(request);
+   *   Mock.completePassthrough(result.correlationId, real);
+   * }
+   */
+  static completePassthrough(correlationId: string, response: Mock.Response): void {
+    Utils.assertType(correlationId, 'string', 'completePassthrough', 'correlationId');
+    if (correlationId.trim().length === 0) {
+      Mock.throwError('completePassthrough', '[correlationId] must not be empty');
+    }
+    if (!Mock.pendingTransactions.has(correlationId)) {
+      Mock.throwError('completePassthrough', `[correlationId] "${correlationId}" does not match any pending passthrough — it may be unknown, already completed, or cleared by reset()`);
+    }
+
+    if (response === null || response === undefined || typeof response !== 'object' || Array.isArray(response)) {
+      Mock.throwError('completePassthrough', `[response] must be a non-null object, got [${response === null ? 'null' : typeof response}]`);
+    }
+    if (typeof response.status !== 'number' || !Number.isInteger(response.status) || response.status < 100 || response.status > 599) {
+      Mock.throwError('completePassthrough', `[response.status] must be a valid HTTP status code (100-599), got [${response.status}]`);
+    }
+    if (response.headers !== undefined && (typeof response.headers !== 'object' || response.headers === null || Array.isArray(response.headers))) {
+      Mock.throwError('completePassthrough', `[response.headers] must be a plain object if provided`);
+    }
+
+    const pending = Mock.pendingTransactions.get(correlationId)!;
+    Log.writeLine(LogLevels.FrameworkDebug, `Mock.completePassthrough: completing passthrough for correlationId ${correlationId} (status ${response.status})`);
+    Mock.pendingTransactions.delete(correlationId);
+    Mock.record({ type: 'passthrough', listenerName: pending.listenerName, request: pending.request, response });
+  }
+
+  // ── Transaction history ────────────────────────────────────────────────────
+
+  /**
+   * Returns all completed transactions in chronological order.
+   *
+   * Includes mocked, passthrough (completed), blocked, and unmatched entries.
+   * Delegated passthroughs awaiting {@link Mock.completePassthrough} appear in
+   * {@link Mock.getPendingTransactions} instead.
+   *
+   * @returns A read-only array of {@link Mock.Transaction} objects.
+   *
+   * @example
+   * const blocked = Mock.getTransactions().filter(t => t.type === 'blocked');
+   */
+  static getTransactions(): readonly Mock.Transaction[] {
+    return Mock.transactions;
+  }
+
+  /**
+   * Clears all completed transactions and resets the transaction counter.
+   *
+   * Pending passthrough transactions and registered listeners are unaffected.
+   * Use {@link Mock.reset} to clear everything in a single call.
+   */
+  static clearTransactions(): void {
+    Log.writeLine(LogLevels.FrameworkInformation, `Mock: Clear transaction history (${Mock.transactions.length} removed)`);
+    Mock.transactions = [];
+    Mock.transactionCounter = 0;
+  }
+
+  /**
+   * Returns all delegated passthrough transactions that have not yet been
+   * completed via {@link Mock.completePassthrough}.
+   *
+   * Use this in test assertions to verify no passthrough calls were abandoned,
+   * or to diagnose remote fetch failures.
+   *
+   * Only populated when {@link Mock.delegateMode} is `true`.
+   *
+   * @returns A read-only array of {@link Mock.PendingTransaction} objects.
+   *
+   * @example
+   * // Assert no orphaned passthroughs after a test
+   * expect(Mock.getPendingTransactions()).toHaveLength(0);
+   */
+  static getPendingTransactions(): readonly Mock.PendingTransaction[] {
+    return [...Mock.pendingTransactions.values()];
+  }
+
+  // ── Reset ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Clears all listeners, completed transactions, pending transactions, and
+   * resets delegate mode to `false`.
+   *
+   * Call this in `beforeEach` or `afterEach` hooks to guarantee a clean slate
+   * between tests.
+   *
+   * @example
+   * beforeEach(() => {
+   *   Mock.reset();
+   *   Mock.addListener('static-assets', [...], 'passthrough');
+   * });
+   */
+  static reset(): void {
+    Log.writeLine(LogLevels.FrameworkInformation, `Mock: Reset (${Mock.listeners.size} listeners, ${Mock.transactions.length} transactions, ${Mock.pendingTransactions.size} pending cleared)`);
+    Mock.listeners.clear();
+    Mock.transactions = [];
+    Mock.transactionCounter = 0;
+    Mock.pendingTransactions.clear();
+    Mock._delegateMode = false;
+  }
+
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  private static throwError(funcName: string, message: string): never {
+    const errorText = `Mock.${funcName}: ${message}`;
+    Log.writeLine(LogLevels.Error, errorText, { stackOffset: 1 });
+    throw new Error(errorText);
   }
 
   private static findMatch(request: Mock.Request): Mock.Listener | undefined {
@@ -419,7 +556,7 @@ export namespace Mock {
    * Represents an HTTP response returned to the AUT, whether real or mocked.
    */
   export interface Response {
-    /** HTTP status code, e.g. `200`, `404`. */
+    /** HTTP status code, e.g. `200`, `404`. Must be 100–599. */
     status: number;
     /** Response headers as a plain key/value object. */
     headers?: Record<string, string>;
@@ -431,13 +568,28 @@ export namespace Mock {
    * Defines what a listener does when it matches a request.
    *
    * - `'block'` — abort the request; the AUT receives no response.
-   * - `'passthrough'` — forward to the real endpoint and return the actual response.
+   * - `'passthrough'` — forward to the real endpoint (or delegate to the caller
+   *   in {@link Mock.delegateMode}) and return the actual response.
    * - {@link Response} — return the supplied mock response without hitting the network.
    */
   export type ListenerAction = 'block' | 'passthrough' | Response;
 
   /**
-   * Describes the outcome of a single intercepted request.
+   * The result returned by {@link Mock.intercept} to the framework adapter.
+   *
+   * - `action: 'fulfill'` — return `response` to the AUT.
+   * - `action: 'block'` — abort the request; the AUT receives nothing.
+   * - `action: 'passthrough'` — only in {@link Mock.delegateMode}. Fetch the
+   *   real response using `request` details and report it back via
+   *   {@link Mock.completePassthrough} using the supplied `correlationId`.
+   */
+  export type InterceptResult =
+    | { action: 'fulfill';     response: Response     }
+    | { action: 'block'                               }
+    | { action: 'passthrough'; correlationId: string  };
+
+  /**
+   * Describes the outcome of a single completed intercepted request.
    *
    * - `'mocked'` — a mock {@link Response} was returned.
    * - `'passthrough'` — the request was forwarded and the real response returned.
@@ -447,10 +599,11 @@ export namespace Mock {
   export type TransactionType = 'mocked' | 'passthrough' | 'blocked' | 'unmatched';
 
   /**
-   * A record of a single intercepted request and its outcome.
+   * A record of a single completed intercepted request and its outcome.
    *
-   * Every call to {@link Mock.intercept} produces one transaction, regardless
-   * of outcome. Use {@link Mock.getTransactions} to retrieve the full history.
+   * Delegated passthroughs awaiting completion appear in
+   * {@link Mock.getPendingTransactions} as {@link PendingTransaction} until
+   * {@link Mock.completePassthrough} is called.
    */
   export interface Transaction {
     /** Auto-incremented identifier, e.g. `'txn-1'`. Resets on {@link Mock.reset}. */
@@ -465,6 +618,23 @@ export namespace Mock {
     request: Request;
     /** The response returned to the AUT. Absent for `'blocked'` and `'unmatched'` transactions. */
     response?: Response;
+  }
+
+  /**
+   * A delegated passthrough that has been issued by {@link Mock.intercept} but
+   * not yet completed via {@link Mock.completePassthrough}.
+   *
+   * Only created when {@link Mock.delegateMode} is `true`.
+   */
+  export interface PendingTransaction {
+    /** The UUID issued by {@link Mock.intercept} to identify this passthrough. */
+    correlationId: string;
+    /** Wall-clock time at which the passthrough was issued. */
+    timestamp: Date;
+    /** Name of the listener that triggered the passthrough. */
+    listenerName: string;
+    /** The original intercepted request. */
+    request: Request;
   }
 
   /** @internal */
