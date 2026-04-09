@@ -144,7 +144,9 @@ export interface WriteLineOptions {
    * //   "MyTest.someStep (myTest.ts:45:3)"
    * Logger.writeLine(Logger.Levels.TestInformation, message, { stackOffset: 1 });
    *
-   * @remarks Not yet implemented — reserved for a future release.
+   * Values less than 1 are treated as 0 (no offset). Values that would exceed
+   * the available stack depth are clipped to the outermost frame.
+   *
    */
   stackOffset?: number;
 }
