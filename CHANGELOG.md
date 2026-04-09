@@ -1,3 +1,10 @@
+## [1.0.2-alpha.1](https://github.com/TeamControlium/controlium-utils/compare/v1.0.1...v1.0.2-alpha.1) (2026-04-01)
+
+
+### Bug Fixes
+
+* Trivial update to force alpha release ([da295d0](https://github.com/TeamControlium/controlium-utils/commit/da295d073d7e21edacb4aef82e8ddee12cb86541))
+
 ## [1.0.1](https://github.com/TeamControlium/controlium-utils/compare/v1.0.0...v1.0.1) (2026-04-01)
 
 
