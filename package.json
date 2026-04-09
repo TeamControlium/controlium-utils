@@ -1,6 +1,6 @@
 {
   "name": "@controlium/utils",
-  "version": "1.0.2-alpha.1",
+  "version": "1.0.2-alpha.2",
   "description": "Shared utilities for Controlium-based projects",
   "type": "module",
   "author": "Team Controllium contributors",
@@ -88,7 +88,12 @@
     ],
     "rootDir": "src",
     "transform": {
-      "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "tsconfig.spec.json" }]
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.spec.json"
+        }
+      ]
     },
     "transformIgnorePatterns": [],
     "coverageDirectory": "../coverage",
