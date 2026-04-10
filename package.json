@@ -31,7 +31,7 @@
     "build:esm": "tsc -p tsconfig.build.json",
     "build": "npm run clean && npm run build:cjs && npm run build:esm",
     "test": "jest --silent --runInBand",
-    "test:debug": "jest --runInBand",
+    "test:debug": "jest --silent=false --runInBand --testMatch=**/mock.spec.ts",
     "test:coverage": "jest --silent --coverage --runInBand",
     "lint": "eslint 'src/**/*.ts' --fix",
     "release": "semantic-release"
