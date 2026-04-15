@@ -1,3 +1,10 @@
+## [1.0.2-alpha.3](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.2...v1.0.2-alpha.3) (2026-04-15)
+
+
+### Bug Fixes
+
+* Add APIUtils and drop CJS support ([00ea938](https://github.com/TeamControlium/controlium-utils/commit/00ea938df783af86703a08bf271b35d851117ceb))
+
 ## [1.0.2-alpha.2](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.1...v1.0.2-alpha.2) (2026-04-09)
 
 
