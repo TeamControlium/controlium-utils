@@ -1,3 +1,4 @@
+import { MockInstance } from 'vitest';
 import { Logger } from "./logger";
 import { readFileSync } from "fs";
 
@@ -368,7 +369,7 @@ describe("Logger", () => {
 
       expect(logOutput).toHaveLength(1);
       expect(logOutput[0]).toMatch(
-        /\[Object\.<anonymous>\(logger\.spec\.ts:\d{1,3}:\d{1,2}\)\]/
+        /\[.*logger\.spec\.ts:\d{1,3}:\d{1,2}\]/
       );
     });
 
@@ -465,7 +466,7 @@ describe("Logger", () => {
     });
 
     it("logs to console.error when callback throws (throwErrorIfLogOutputFails=false)", () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       Logger.logOutputCallback = () => { throw new Error("callback boom"); };
 
       Logger.writeLine(Logger.Levels.Error, "test");
@@ -480,14 +481,14 @@ describe("Logger", () => {
     });
 
     it("re-throws when callback throws and throwErrorIfLogOutputFails=true", () => {
-      jest.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(console, "error").mockImplementation(() => {});
       Logger.throwErrorIfLogOutputFails = true;
       Logger.logOutputCallback = () => { throw new Error("callback boom"); };
 
       expect(() => Logger.writeLine(Logger.Levels.Error, "test")).toThrow(
         /Error thrown from Log Output Callback during writeLine/
       );
-      jest.restoreAllMocks();
+      vi.restoreAllMocks();
     });
   });
 
@@ -554,7 +555,7 @@ describe("Logger", () => {
     it("preamble still shows the caller's file and location", () => {
       Logger.writeLine(Logger.Levels.Error, "panic caller test");
       expect(logOutput[0]).toMatch(
-        /\[Object\.<anonymous>\(logger\.spec\.ts:\d{1,3}:\d{1,2}\)\]/
+        /\[.*logger\.spec\.ts:\d{1,3}:\d{1,2}\]/
       );
     });
 
@@ -728,12 +729,12 @@ describe("Logger", () => {
   // ---------------------------------------------------------------------------
 
   describe("Console output", () => {
-    let logSpy: jest.SpyInstance;
+    let logSpy: MockInstance;
     let logOutput: string[];
 
     beforeEach(() => {
       logOutput = [];
-      logSpy = jest.spyOn(console, "log").mockImplementation();
+      logSpy = vi.spyOn(console, "log").mockImplementation();
       Logger.loggingLevel = Logger.Levels.FrameworkDebug;
     });
 
@@ -814,7 +815,7 @@ describe("Logger", () => {
     });
 
     it("logs an error when callback is not a function", () => {
-      const consoleSpy = jest.spyOn(console, "log").mockImplementation();
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
       Logger.clearOutputCallback();
       Logger.logToConsole = false;
       Logger.attach(Logger.Levels.Error, "test", "text/plain");
@@ -827,7 +828,7 @@ describe("Logger", () => {
 
     it("when callback is set to a non-function, error is logged via console", () => {
       (Logger.logOutputCallback as any) = "not-a-function";
-      const consoleSpy = jest.spyOn(console, "log").mockImplementation();
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
       Logger.attach(Logger.Levels.Error, "test", "text/plain");
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringMatching(/Log Output callback is type \[string\]/)
