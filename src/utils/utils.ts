@@ -3,7 +3,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import path from "path";
 
 import { decodeHTML } from "entities";
-import { decode as jwtDecode, sign as jwtSign } from "jsonwebtoken";
+import { createRequire } from 'module';
+const { sign: jwtSign, decode: jwtDecode } = createRequire(import.meta.url)('jsonwebtoken') as typeof import('jsonwebtoken');
 import psTree from "ps-tree";
 
 // import { Detokeniser } from "./Detokeniser"; Claude, just masking this out for now...
@@ -127,7 +128,7 @@ export class Utils {
      * @param obj - Value to check.
      * @returns `true` if `null` or `undefined`, otherwise `false`.
      */
-    static isNullOrUndefined(obj?: unknown): boolean {
+    static isNullOrUndefined(obj?: unknown): obj is null | undefined {
         try {
             return obj === null || obj === undefined;
         } catch {
@@ -135,13 +136,13 @@ export class Utils {
         }
     }
 
-    /**
+    /**2
      * Safely checks if a value is `null`.
      *
      * @param obj - Value to check.
      * @returns `true` if `null`, otherwise `false`.
      */
-    static isNull(obj?: unknown): boolean {
+    static isNull(obj?: unknown): obj is null {
         return obj === null;
     }
 
@@ -151,7 +152,7 @@ export class Utils {
      * @param obj - Value to check.
      * @returns `true` if `undefined`, otherwise `false`.
      */
-    static isUndefined(obj?: unknown): boolean {
+    static isUndefined(obj?: unknown): obj is undefined {
         return obj === undefined;
     }
 
