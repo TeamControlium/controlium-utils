@@ -1,14 +1,14 @@
+import { STATUS_CODES } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { JSONPath } from 'jsonpath-plus';
 import { Utils } from '../utils/utils';
-import { Log, LogLevels } from '..';
+import { JsonUtils, Log, Logger, LogLevels } from '..';
 
 /**
  * Static HTTP request interception and mocking utility for test suites.
  *
  * `Mock` is designed to sit between a test framework's network interceptor
  * (e.g. Playwright's `page.route`) and the application under test. Every
- * outgoing request from the AUT is forwarded to {@link Mock.intercept}, which
+ * outgoing request from the AUT must be forwarded to {@link Mock.processInterceptedRequest}, which
  * decides how to handle it based on the registered listeners.
  *
  * **Default-deny**: any request that does not match a listener is blocked and
@@ -27,7 +27,7 @@ import { Log, LogLevels } from '..';
  *
  * `Mock` runs in the same process as the test framework. When a `passthrough`
  * listener matches, `Mock` fetches the real response itself and returns it
- * directly. {@link Mock.intercept} always resolves to a {@link Mock.InterceptResult}
+ * directly. {@link Mock.processInterceptedRequest} always resolves to a {@link Mock.InterceptResult}
  * with `action: 'fulfill'` or `action: 'block'`.
  *
  * ### Delegate mode
@@ -35,7 +35,7 @@ import { Log, LogLevels } from '..';
  * Enable with `Mock.delegateMode = true` when `Mock` is hosted in a remote
  * server (e.g. a mock proxy) and the caller — not `Mock` — is better placed
  * to perform the real network fetch. In this mode, when a `passthrough`
- * listener matches, {@link Mock.intercept} returns `action: 'passthrough'`
+ * listener matches, {@link Mock.processInterceptedRequest} returns `action: 'passthrough'`
  * plus a `correlationId`. The caller fetches the real response and reports it
  * back via {@link Mock.completePassthrough}, allowing `Mock` to record the
  * full transaction. Use {@link Mock.getPendingTransactions} to detect
@@ -89,7 +89,7 @@ export class Mock {
 
   /**
    * When `true`, passthrough requests are delegated to the caller rather than
-   * fetched by `Mock` itself. {@link Mock.intercept} returns
+   * fetched by `Mock` itself. {@link Mock.processInterceptedRequest} returns
    * `action: 'passthrough'` with a `correlationId` for the caller to use when
    * reporting the real response back via {@link Mock.completePassthrough}.
    *
@@ -174,9 +174,9 @@ export class Mock {
         Mock.throwError('addListener', `[matchers[${index}]] must not be empty`);
       }
       try {
-        JSONPath({ path: matcher, json: {}, wrap: true });
+        JsonUtils.getMatchingJSONPropertyCount({}, matcher);
       } catch (e) {
-        Mock.throwError('addListener', `[matchers[${index}]] is not valid JSONPath syntax: "${matcher}". ${(e as Error).message}`);
+        Mock.throwError('addListener', `Matcher item [${index}] is not valid JSONPath syntax: "${matcher}". ${(e as Error).message}`);
       }
     });
 
@@ -191,6 +191,9 @@ export class Mock {
       if (response.headers !== undefined && (typeof response.headers !== 'object' || response.headers === null || Array.isArray(response.headers))) {
         Mock.throwError('addListener', `[action.headers] must be a plain object if provided`);
       }
+      if (Utils.isUndefined(action.statusText))
+        action.statusText = STATUS_CODES[action.status] ?? undefined;
+      else if (action.statusText === '_undefined') action.statusText = undefined;
     }
 
     Utils.assertType(delayMs, 'number', 'addListener', 'delayMs');
@@ -265,7 +268,7 @@ export class Mock {
    * | Matched → block | `'block'` | `'blocked'` |
    * | No listener matched | `'block'` | `'unmatched'` |
    *
-   * @param request - The intercepted request. Must be a non-null object with
+   * @param interceptedRequest - The intercepted request. Must be a non-null object with
    *   non-empty `url` and `method` string properties.
    *
    * @returns A promise resolving to a {@link Mock.InterceptResult}.
@@ -285,27 +288,27 @@ export class Mock {
    *   abortRequest();
    * }
    */
-  static async intercept(request: Mock.Request): Promise<Mock.InterceptResult> {
-    if (request === null || request === undefined || typeof request !== 'object' || Array.isArray(request)) {
-      Mock.throwError('intercept', `[request] must be a non-null object, got [${request === null ? 'null' : typeof request}]`);
+  static async processInterceptedRequest(interceptedRequest: Mock.Request): Promise<Mock.InterceptResult> {
+    if (interceptedRequest === null || interceptedRequest === undefined || typeof interceptedRequest !== 'object' || Array.isArray(interceptedRequest)) {
+      Mock.throwError('intercept', `[request] must be a non-null object, got [${interceptedRequest === null ? 'null' : typeof interceptedRequest}]`);
     }
-    if (typeof request.url !== 'string' || request.url.trim().length === 0) {
-      Mock.throwError('intercept', `[request.url] must be a non-empty string, got [${typeof request.url}]`);
+    if (typeof interceptedRequest.url !== 'string' || interceptedRequest.url.trim().length === 0) {
+      Mock.throwError('intercept', `[request.url] must be a non-empty string, got [${typeof interceptedRequest.url}]`);
     }
-    if (typeof request.method !== 'string' || request.method.trim().length === 0) {
-      Mock.throwError('intercept', `[request.method] must be a non-empty string, got [${typeof request.method}]`);
+    if (typeof interceptedRequest.method !== 'string' || interceptedRequest.method.trim().length === 0) {
+      Mock.throwError('intercept', `[request.method] must be a non-empty string, got [${typeof interceptedRequest.method}]`);
     }
-    if (request.headers !== undefined && request.headers !== null && (typeof request.headers !== 'object' || Array.isArray(request.headers))) {
+    if (interceptedRequest.headers !== undefined && interceptedRequest.headers !== null && (typeof interceptedRequest.headers !== 'object' || Array.isArray(interceptedRequest.headers))) {
       Mock.throwError('intercept', `[request.headers] must be a plain object if provided`);
     }
 
-    Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: ${request.method} ${request.url}`);
+    Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: ${interceptedRequest.method} ${interceptedRequest.url}`);
 
-    const listener = Mock.findMatch(request);
+    const listener = Mock.findMatch(interceptedRequest);
 
     if (!listener) {
       Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: no listener matched — blocking`);
-      Mock.record({ type: 'unmatched', request });
+      Mock.record({ type: 'unmatched', request: interceptedRequest });
       return { action: 'block' };
     }
 
@@ -318,7 +321,7 @@ export class Mock {
 
     if (listener.action === 'block') {
       Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: blocking request`);
-      Mock.record({ type: 'blocked', listenerName: listener.name, request });
+      Mock.record({ type: 'blocked', listenerName: listener.name, request: interceptedRequest });
       return { action: 'block' };
     }
 
@@ -330,19 +333,19 @@ export class Mock {
           correlationId,
           timestamp: new Date(),
           listenerName: listener.name,
-          request,
+          request: interceptedRequest,
         });
         return { action: 'passthrough', correlationId };
       }
       Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: passing through to real endpoint`);
-      const response = await Mock.fetchReal(request);
-      Mock.record({ type: 'passthrough', listenerName: listener.name, request, response });
+      const response = await Mock.fetchReal(interceptedRequest);
+      Mock.record({ type: 'passthrough', listenerName: listener.name, request: interceptedRequest, response });
       return { action: 'fulfill', response };
     }
 
     const response = listener.action as Mock.Response;
     Log.writeLine(LogLevels.FrameworkDebug, `Mock.intercept: returning mocked response (status ${response.status})`);
-    Mock.record({ type: 'mocked', listenerName: listener.name, request, response });
+    Mock.record({ type: 'mocked', listenerName: listener.name, request: interceptedRequest, response });
     return { action: 'fulfill', response };
   }
 
@@ -351,10 +354,10 @@ export class Mock {
    * fetched. Records the full transaction and removes the pending entry.
    *
    * Only relevant when {@link Mock.delegateMode} is `true`. The `correlationId`
-   * must match one previously returned by {@link Mock.intercept}.
+   * must match one previously returned by {@link Mock.processInterceptedRequest}.
    *
    * @param correlationId - The UUID returned in the `action: 'passthrough'`
-   *   result from {@link Mock.intercept}. Must be a non-empty string that
+   *   result from {@link Mock.processInterceptedRequest}. Must be a non-empty string that
    *   matches a pending transaction.
    *
    * @param response - The real response the caller received from the endpoint.
@@ -477,18 +480,29 @@ export class Mock {
   }
 
   private static findMatch(request: Mock.Request): Mock.Listener | undefined {
+    Logger.writeLine(LogLevels.FrameworkInformation, `Checking if any listeners for [${request.url} (${request.method})]`);
     for (const listener of Mock.listeners.values()) {
       try {
-        const allMatch = listener.matchers.every((path) => {
+        const allMatch = listener.matchers.every((matcher) => {
           try {
-            const results = JSONPath({ path, json: request, wrap: true });
-            return Array.isArray(results) && results.length > 0;
+            const x = JSON.stringify(request, null, 2);
+            Logger.writeLine(LogLevels.TestInformation, x);
+            const matched = JsonUtils.getMatchingJSONPropertyCount([request] as unknown as object, matcher) > 0;
+            if (matched) {
+              Logger.writeLine(LogLevels.FrameworkDebug, `Matched on [${matcher}]`);
+              return true;
+            }
+            return false;
           } catch (e) {
-            Log.writeLine(LogLevels.Warning, `Mock: JSONPath evaluation error in listener <${listener.name}> for path "${path}": ${(e as Error).message} — treating as non-match`);
+            Log.writeLine(LogLevels.Warning, `Mock: JSONPath evaluation error in listener <${listener.name}> for path "${matcher}": ${(e as Error).message} — treating as non-match`);
             return false;
           }
         });
+
         if (allMatch) return listener;
+        else {
+          Logger.writeLine(LogLevels.FrameworkDebug, 'No matches');
+        }
       } catch (e) {
         Log.writeLine(LogLevels.Warning, `Mock: Unexpected error evaluating listener <${listener.name}>: ${(e as Error).message} — skipping`);
       }
@@ -558,6 +572,8 @@ export namespace Mock {
   export interface Response {
     /** HTTP status code, e.g. `200`, `404`. Must be 100–599. */
     status: number;
+    /** HTTP status text, eg. 'ok' or 'Internal Server Error' etc */
+    statusText?: string;
     /** Response headers as a plain key/value object. */
     headers?: Record<string, string>;
     /** Response body. Objects are serialised to JSON by the framework adapter. */
@@ -575,7 +591,7 @@ export namespace Mock {
   export type ListenerAction = 'block' | 'passthrough' | Response;
 
   /**
-   * The result returned by {@link Mock.intercept} to the framework adapter.
+   * The result returned by {@link Mock.processInterceptedRequest} to the framework adapter.
    *
    * - `action: 'fulfill'` — return `response` to the AUT.
    * - `action: 'block'` — abort the request; the AUT receives nothing.
@@ -584,9 +600,9 @@ export namespace Mock {
    *   {@link Mock.completePassthrough} using the supplied `correlationId`.
    */
   export type InterceptResult =
-    | { action: 'fulfill';     response: Response     }
-    | { action: 'block'                               }
-    | { action: 'passthrough'; correlationId: string  };
+    | { action: 'fulfill'; response: Response }
+    | { action: 'block' }
+    | { action: 'passthrough'; correlationId: string };
 
   /**
    * Describes the outcome of a single completed intercepted request.
@@ -621,13 +637,13 @@ export namespace Mock {
   }
 
   /**
-   * A delegated passthrough that has been issued by {@link Mock.intercept} but
+   * A delegated passthrough that has been issued by {@link Mock.processInterceptedRequest} but
    * not yet completed via {@link Mock.completePassthrough}.
    *
    * Only created when {@link Mock.delegateMode} is `true`.
    */
   export interface PendingTransaction {
-    /** The UUID issued by {@link Mock.intercept} to identify this passthrough. */
+    /** The UUID issued by {@link Mock.processInterceptedRequest} to identify this passthrough. */
     correlationId: string;
     /** Wall-clock time at which the passthrough was issued. */
     timestamp: Date;
