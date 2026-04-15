@@ -57,9 +57,6 @@ interface DoTokenPreambleReturn {
  * - **expression** — what to compute (type-specific)
  * - **format** — how to format the result (type-specific, often optional)
  *
- * The delimiter `|` and the `[[` / `]]` endstops are configurable via {@link Detokeniser.delimiter} and
- * {@link Detokeniser.tokenStartEndChars}, but the defaults cover the vast majority of use cases.
- *
  * ---
  * ## Built-in token types
  *
@@ -164,88 +161,28 @@ interface DoTokenPreambleReturn {
  *
  * ---
  * ## Extending with callbacks
- * Custom token types are registered via {@link Detokeniser.addCallbackSync} (for sync processing) or
- * {@link Detokeniser.addCallbackAsync} (for async processing). Callbacks are tried in registration
- * order; return `undefined` to pass to the next callback. If all callbacks return `undefined` and no
- * built-in handler matched, an error is thrown.
+ * Custom token types are registered via {@link Detokeniser.addCallback}. Both sync and async handlers
+ * share the same registration method and callback list. Callbacks are tried in registration order;
+ * return `undefined` to pass to the next callback. If all callbacks return `undefined` and no built-in
+ * handler matched, an error is thrown.
  *
- * @see {@link Detokeniser.addCallbackSync}
- * @see {@link Detokeniser.addCallbackAsync}
+ * Async callbacks are silently skipped when {@link Detokeniser.do} (sync) is used — use
+ * {@link Detokeniser.doAsync} if your callback returns a Promise.
+ *
+ * @see {@link Detokeniser.addCallback}
  * @see {@link Detokeniser.do}
  * @see {@link Detokeniser.doAsync}
  */
 export class Detokeniser {
-  private static _endTokenChar = "]]";
-  private static _startTokenChar = "[[";
+  private static readonly _endTokenChar = "]]";
+  private static readonly _startTokenChar = "[[";
   private static EscapeChar = "/";
-  private static _delimiter = "|";
+  private static readonly _delimiter = "|";
 
-  private static _asyncCallbacks: Array<Detokeniser.Callback_Async> | undefined = undefined;
-  private static _syncCallbacks: Array<Detokeniser.Callback_Sync> | undefined = undefined;
-
-  /**
-   * Gets the current single-character delimiter used to separate token parts.
-   * Default: `|`
-   */
-  public static get delimiter(): string {
-    return this._delimiter;
-  }
-
-  /**
-   * Sets the single-character delimiter used to separate token parts.
-   * The new value applies to all subsequent {@link Detokeniser.do} / {@link Detokeniser.doAsync} calls.
-   * @param newDelimiter - Exactly one character
-   * @throws If `newDelimiter` is not exactly one character
-   * @example
-   * Detokeniser.delimiter = ':';
-   * Detokeniser.do('[[random:digits:6]]'); // → e.g. '482910'
-   * Detokeniser.reset();                   // restore default '|'
-   */
-  public static set delimiter(newDelimiter: string) {
-    if (newDelimiter.length !== 1) {
-      const errTxt = `Invalid delimiter [${newDelimiter}].  Must be exactly 1 character!`;
-      Log.writeLine(LogLevels.Error, errTxt);
-      throw new Error(errTxt);
-    } else {
-      this._delimiter = newDelimiter;
-    }
-  }
-
-  /**
-   * Sets the start and end token sequences.
-   * @param startEndChars - An even-length string whose first half is the start sequence and second half the end sequence.
-   * @example Detokeniser.tokenStartEndChars = "[[]]"; // start = "[[", end = "]]"
-   * @remarks Start and end sequences must differ. Minimum total length is 2 (one char each).
-   */
-  public static set tokenStartEndChars(startEndChars: string) {
-    if (startEndChars.length < 2 || startEndChars.length % 2 !== 0) {
-      const errTxt = `Invalid start/end chars [${startEndChars}]. Must be an even number of characters (minimum 2) — first half as start sequence, second half as end sequence!`;
-      Log.writeLine(LogLevels.Error, errTxt);
-      throw new Error(errTxt);
-    }
-    const half = startEndChars.length / 2;
-    const start = startEndChars.substring(0, half);
-    const end = startEndChars.substring(half);
-    if (start === end) {
-      const errTxt = `Invalid start/end chars — start sequence [${start}] must differ from end sequence [${end}]!`;
-      Log.writeLine(LogLevels.Error, errTxt);
-      throw new Error(errTxt);
-    }
-    this._startTokenChar = start;
-    this._endTokenChar = end;
-  }
-
-  /**
-   * Gets the current token start/end sequences concatenated (e.g. `"[[]]"`).
-   */
-  public static get tokenStartEndChars(): string {
-    return this._startTokenChar + this._endTokenChar;
-  }
+  private static _callbacks: Array<Detokeniser.Callback> | undefined = undefined;
 
   /**
    * Resets the Detokeniser to factory defaults:
-   * - Token endstops restored to `[[` / `]]`
-   * - Delimiter restored to `|`
    * - Escape char restored to `/`
    * - All registered sync and async callbacks cleared
    *
@@ -254,125 +191,60 @@ export class Detokeniser {
    * afterEach(() => Detokeniser.reset());
    */
   public static reset() {
-    this._endTokenChar = "]]";
-    this._startTokenChar = "[[";
     this.EscapeChar = "/";
-    this._delimiter = "|";
-    if (this._syncCallbacks) {
-      this._syncCallbacks = [];
-    }
-    if (this._asyncCallbacks) {
-      this._asyncCallbacks = [];
-    }
-    this._asyncCallbacks = undefined;
-    this._syncCallbacks = undefined;
+    this._callbacks = undefined;
   }
 
   /**
-   * Registers a synchronous custom token handler.
+   * Registers a custom token handler. Both sync and async handlers are registered via this method
+   * and share the same callback list.
    *
-   * When {@link Detokeniser.do} encounters a token not handled by the built-in set, it invokes each
-   * registered sync callback in registration order. The first to return a non-`undefined` string wins.
-   * Return `undefined` to pass to the next callback. If all callbacks return `undefined`, an error is thrown.
+   * Callbacks are tried in registration order. The first to return a non-`undefined` value wins.
+   * Return `undefined` to pass to the next callback. If all callbacks return `undefined` and no
+   * built-in handler matched, an error is thrown.
    *
-   * @param callback - `(delimiter: string, token: string) => string | undefined`
-   *   - `delimiter` — current delimiter character (default `|`)
-   *   - `token` — full token body without `[[` / `]]`, e.g. `"mytype|arg1|arg2"`
+   * Async callbacks (those returning a `Promise`) are silently skipped when {@link Detokeniser.do}
+   * is used — register an async callback only if you intend to call {@link Detokeniser.doAsync}.
+   *
+   * @param callback - `(token: string) => string | undefined | Promise<string | undefined>`
+   *   - `token` — full token body without `[[` / `]]`, e.g. `"mytype|arg1|arg2"` (delimiter is always `|`)
    *
    * @example
-   * // Handle [[env|VAR_NAME]] tokens
-   * Detokeniser.addCallbackSync((delimiter, token) => {
-   *   const [type, name] = token.split(delimiter);
-   *   if (type.toLowerCase() !== 'env') return undefined;
+   * // Sync handler for [[env|VAR_NAME]] tokens
+   * Detokeniser.addCallback((token) => {
+   *   const [type, name] = token.split('|');
+   *   if (type !== 'env') return undefined;
    *   return process.env[name] ?? '';
    * });
    * Detokeniser.do('Path: [[env|HOME]]'); // → 'Path: /home/user'
    *
    * @example
-   * // Multiple callbacks — each handles one type, passes on the rest
-   * Detokeniser.addCallbackSync((delimiter, token) => {
-   *   const [type, value] = token.split(delimiter);
-   *   if (type === 'upper') return value.toUpperCase();
-   *   return undefined;
-   * });
-   * Detokeniser.addCallbackSync((delimiter, token) => {
-   *   const [type, value] = token.split(delimiter);
-   *   if (type === 'lower') return value.toLowerCase();
-   *   return undefined;
-   * });
-   * Detokeniser.do('[[upper|hello]] [[lower|WORLD]]'); // → 'HELLO world'
-   *
-   * @see {@link Detokeniser.resetSyncCallbacks} to remove all sync callbacks
-   * @see {@link Detokeniser.addCallbackAsync} for async token handlers
-   */
-  public static addCallbackSync(callback: Detokeniser.Callback_Sync) {
-    if (!this._syncCallbacks) {
-      this._syncCallbacks = new Array<Detokeniser.Callback_Sync>();
-    }
-    this._syncCallbacks.push(callback);
-  }
-
-  /**
-   * Registers an asynchronous custom token handler.
-   *
-   * Works identically to {@link Detokeniser.addCallbackSync} but is invoked by {@link Detokeniser.doAsync}.
-   * Async callbacks are tried in registration order; the first to return a non-`undefined` value wins.
-   * Return `undefined` to pass to the next callback.
-   *
-   * @param asyncCallback - `(delimiter: string, token: string) => Promise<string | undefined>`
-   *   - `delimiter` — current delimiter character (default `|`)
-   *   - `token` — full token body without `[[` / `]]`, e.g. `"mytype|arg1|arg2"`
-   *
-   * @example
-   * // Handle [[db|table|column|whereClause]] tokens
-   * Detokeniser.addCallbackAsync(async (delimiter, token) => {
-   *   const [type, table, column, where] = token.split(delimiter);
-   *   if (type.toLowerCase() !== 'db') return undefined;
+   * // Async handler for [[db|table|column|where]] tokens
+   * Detokeniser.addCallback(async (token) => {
+   *   const [type, table, column, where] = token.split('|');
+   *   if (type !== 'db') return undefined;
    *   const row = await db.query(`SELECT ${column} FROM ${table} WHERE ${where} LIMIT 1`);
    *   return String(row[column]);
    * });
    * const result = await Detokeniser.doAsync('ID: [[db|users|id|active=1]]');
    *
-   * @example
-   * // Combine with nested tokens — inner tokens resolve before the callback is called
-   * Detokeniser.addCallbackAsync(async (delimiter, token) => {
-   *   const [type, key] = token.split(delimiter);
-   *   if (type !== 'cache') return undefined;
-   *   return await redis.get(key);
-   * });
-   * // [[random|digits|8]] resolves first, then [[cache|...]] receives the result
-   * await Detokeniser.doAsync('Val: [[cache|prefix-[[random|digits|8]]]]');
-   *
-   * @see {@link Detokeniser.resetAsyncCallbacks} to remove all async callbacks
-   * @see {@link Detokeniser.addCallbackSync} for synchronous token handlers
+   * @see {@link Detokeniser.resetCallbacks} to remove all registered callbacks
+   * @see {@link Detokeniser.doAsync} for async token resolution
    */
-  public static addCallbackAsync(asyncCallback: Detokeniser.Callback_Async) {
-    if (!this._asyncCallbacks) {
-      this._asyncCallbacks = new Array<Detokeniser.Callback_Async>();
+  public static addCallback(callback: Detokeniser.Callback) {
+    if (!this._callbacks) {
+      this._callbacks = new Array<Detokeniser.Callback>();
     }
-    this._asyncCallbacks?.push(asyncCallback);
+    this._callbacks.push(callback);
   }
 
   /**
-   * Removes all registered sync callbacks. Built-in token handlers are unaffected.
+   * Removes all registered callbacks. Built-in token handlers are unaffected.
    * Use between tests or scenarios to ensure callback isolation.
-   * @see {@link Detokeniser.reset} to also clear async callbacks and restore all defaults
+   * @see {@link Detokeniser.reset} to also restore all defaults
    */
-  public static resetSyncCallbacks() {
-    if (this._syncCallbacks) {
-      this._syncCallbacks = [];
-    }
-  }
-
-  /**
-   * Removes all registered async callbacks. Built-in token handlers are unaffected.
-   * Use between tests or scenarios to ensure callback isolation.
-   * @see {@link Detokeniser.reset} to also clear sync callbacks and restore all defaults
-   */
-  public static resetAsyncCallbacks() {
-    if (this._asyncCallbacks) {
-      this._asyncCallbacks = [];
-    }
+  public static resetCallbacks() {
+    this._callbacks = undefined;
   }
 
   /**
@@ -467,8 +339,8 @@ export class Detokeniser {
    *
    * @example
    * // Async callback for database-driven tokens
-   * Detokeniser.addCallbackAsync(async (delim, token) => {
-   *   const [type, key] = token.split(delim);
+   * Detokeniser.addCallbackAsync(async (token) => {
+   *   const [type, key] = token.split('|');
    *   if (type !== 'db') return undefined;
    *   return await fetchFromDatabase(key);
    * });
@@ -616,9 +488,11 @@ export class Detokeniser {
     //
     try {
       if (Utils.isNullOrUndefined(processedToken)) {
-        if (typeof this._syncCallbacks != "undefined") {
-          this._syncCallbacks.every((callback) => {
-            processedToken = callback(this._delimiter, token);
+        if (typeof this._callbacks != "undefined") {
+          this._callbacks.every((callback) => {
+            const result = callback(token);
+            if (result instanceof Promise) return true; // skip async callbacks in sync context
+            processedToken = result;
             return Utils.isNullOrUndefined(processedToken);
           });
         }
@@ -647,9 +521,9 @@ export class Detokeniser {
     //
     try {
       if (Utils.isNullOrUndefined(processedToken)) {
-        if (typeof this._asyncCallbacks != "undefined") {
-          for (let i = 0; i < this._asyncCallbacks.length; i++) {
-            processedToken = await this._asyncCallbacks[i](this._delimiter, token);
+        if (typeof this._callbacks != "undefined") {
+          for (const callback of this._callbacks) {
+            processedToken = await Promise.resolve(callback(token));
             if (!Utils.isNullOrUndefined(processedToken)) break;
           }
         }
@@ -901,7 +775,7 @@ export class Detokeniser {
       case "addhours":
         returnDate = addHours(date, this.getParsedDateOffset(dateTokenPrep.params, dateTokenPrep.errParseDateOffset)).getTime();
         break;
-      case "addMinutes":
+      case "addminutes":
         returnDate = addMinutes(date, this.getParsedDateOffset(dateTokenPrep.params, dateTokenPrep.errParseDateOffset)).getTime();
         break;
       case "followingday": {
@@ -1234,25 +1108,16 @@ class InnermostToken {
 // ─── Detokeniser types ────────────────────────────────────────────────────────
 
 /**
- * Signature for an asynchronous custom token handler registered via {@link Detokeniser.addCallbackAsync}.
+ * Signature for a custom token handler registered via {@link Detokeniser.addCallback}.
  *
- * @param delimiter - Current delimiter character (default `|`)
- * @param token - Full token body without `[[` / `]]` endstops, e.g. `"mytype|arg1|arg2"`
- * @returns Promise resolving to the replacement string, or `undefined` to pass to the next handler
- */
-export interface Detokeniser_Callback_Async {
-  (delimiter: string, token: string): Promise<string | undefined>;
-}
-
-/**
- * Signature for a synchronous custom token handler registered via {@link Detokeniser.addCallbackSync}.
+ * May be synchronous or asynchronous. Async callbacks (returning a `Promise`) are silently skipped
+ * by {@link Detokeniser.do} and only invoked by {@link Detokeniser.doAsync}.
  *
- * @param delimiter - Current delimiter character (default `|`)
- * @param token - Full token body without `[[` / `]]` endstops, e.g. `"mytype|arg1|arg2"`
- * @returns The replacement string, or `undefined` to pass to the next handler
+ * @param token - Full token body without `[[` / `]]` endstops, e.g. `"mytype|arg1|arg2"` (delimiter is always `|`)
+ * @returns The replacement string, a Promise resolving to it, or `undefined` to pass to the next handler
  */
-export interface Detokeniser_Callback_Sync {
-  (delimiter: string, token: string): string | undefined;
+export interface Detokeniser_Callback {
+  (token: string): string | undefined | Promise<string | undefined>;
 }
 
 /**
@@ -1269,7 +1134,6 @@ export interface Detokeniser_DoOptions {
 
 // eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace Detokeniser {
-  export type Callback_Async = Detokeniser_Callback_Async;
-  export type Callback_Sync = Detokeniser_Callback_Sync;
+  export type Callback = Detokeniser_Callback;
   export type DoOptions = Detokeniser_DoOptions;
 }

@@ -1,3 +1,19 @@
+## [1.0.2-alpha.2](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.1...v1.0.2-alpha.2) (2026-04-09)
+
+
+### Bug Fixes
+
+* PR Comments; Added ability for remote mocks ([af12e48](https://github.com/TeamControlium/controlium-utils/commit/af12e48389abe48a5724a0fc897e2cc679c352e3))
+* Properly track remote branch ([2ecb728](https://github.com/TeamControlium/controlium-utils/commit/2ecb728a24a04c30344687847e32e9e2bd524a27))
+* Revert back to npm tokens until Semantic release catchup ([9354f5e](https://github.com/TeamControlium/controlium-utils/commit/9354f5e0acf3e56c0c1a4bde3c18fdb297fab338))
+
+## [1.0.2-alpha.1](https://github.com/TeamControlium/controlium-utils/compare/v1.0.1...v1.0.2-alpha.1) (2026-04-01)
+
+
+### Bug Fixes
+
+* Trivial update to force alpha release ([da295d0](https://github.com/TeamControlium/controlium-utils/commit/da295d073d7e21edacb4aef82e8ddee12cb86541))
+
 ## [1.0.1](https://github.com/TeamControlium/controlium-utils/compare/v1.0.0...v1.0.1) (2026-04-01)
 
 
