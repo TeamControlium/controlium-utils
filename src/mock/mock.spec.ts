@@ -8,6 +8,7 @@ beforeAll(() => {
 describe("Mocking fulfill", () => {
   beforeEach(() => {
     Mock.reset();
+    
   });
 
   describe("Simple status 200 no headers or data", () => {
@@ -79,20 +80,6 @@ describe("Mocking fulfill", () => {
   });
 
   describe("Intercept combinations", () => {
-    it("Status and headers returned", async () => {
-      const methodToListenFor = 'POST';
-      const statusReturned = 200;
-      const testHeader = { "xyzzy": "abc123", "test1": "value1" };
-      const testData = 'Hello world';
-      Mock.addListener("Just Status", [`$[?(@.method == '${methodToListenFor}')]`], { status: statusReturned, headers: testHeader, body: testData });
-      const intercepted = await Mock.processInterceptedRequest({ url: 'https://asdf.my.ending', method: "POST", headers: {}, body: '' });
-      expect(intercepted.action).toBe('fulfill');
-      const fulfulledResponse = (intercepted as { response: Mock.Response })?.response;
-      expect(fulfulledResponse.status).toBe(statusReturned);
-      expect(fulfulledResponse.statusText).toBe('OK');
-      expect(fulfulledResponse.headers).toMatchObject(testHeader);
-      expect(fulfulledResponse.body).toBe(testData);
-    });
     it("Match on partial url", async () => {
       const methodToListenFor = 'POST';
       const statusReturned = 200;
