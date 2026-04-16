@@ -2,7 +2,7 @@ import { Agent, Headers, ProxyAgent, fetch } from 'undici';
 
 import { Log, LogLevels, Utils } from '../index';
 
-export class EAAPIUtils {
+export class APIUtils {
 
   /**
    * Verify if HTTP server listening
@@ -88,8 +88,8 @@ export class EAAPIUtils {
    * The caller-supplied timeout (or the default 10s) is enforced as a hard failsafe via AbortSignal.
    */
   public static async performHTTPOperation(
-    httpRequest: EAAPIUtils.HTTPRequest
-  ): Promise<EAAPIUtils.HTTPResponse> {
+    httpRequest: APIUtils.HTTPRequest
+  ): Promise<APIUtils.HTTPResponse> {
     const API_DEFAULT_TIMEOUT = 10000;
     let dispatcher: Agent | ProxyAgent | undefined;
 
@@ -142,7 +142,7 @@ export class EAAPIUtils {
     }
   }
 
-  private static buildURL(httpRequest: EAAPIUtils.HTTPRequest): string {
+  private static buildURL(httpRequest: APIUtils.HTTPRequest): string {
     let builtUrl = httpRequest.protocol;
     builtUrl += '://';
     builtUrl += httpRequest.host.endsWith('/')
@@ -162,7 +162,7 @@ export class EAAPIUtils {
     return builtUrl;
   }
 
-  private static buildDispatcher(httpRequest: EAAPIUtils.HTTPRequest): Agent | ProxyAgent {
+  private static buildDispatcher(httpRequest: APIUtils.HTTPRequest): Agent | ProxyAgent {
     if (!Utils.isNullOrUndefined(httpRequest.proxy)) {
       const proxyAgent = new ProxyAgent({
         uri: httpRequest.proxy as string,
@@ -174,7 +174,7 @@ export class EAAPIUtils {
     return new Agent({ connect: { timeout: httpRequest.timeout } });
   }
 
-  private static buildHeaders(httpHeaders: EAAPIUtils.HTTPHeaders): Headers {
+  private static buildHeaders(httpHeaders: APIUtils.HTTPHeaders): Headers {
     const headers = new Headers();
     for (const [key, value] of Object.entries(httpHeaders)) {
       if (!Utils.isNull(value)) {
@@ -234,7 +234,7 @@ export class EAAPIUtils {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-namespace
-export namespace EAAPIUtils {
+export namespace APIUtils {
   /**
    * Generic HTTP call Header items
    */
