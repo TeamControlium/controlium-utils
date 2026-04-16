@@ -1,3 +1,11 @@
+## [1.0.2-alpha.4](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.3...v1.0.2-alpha.4) (2026-04-16)
+
+
+### Bug Fixes
+
+* Ensure APIUtils is exposed ([6ae3a37](https://github.com/TeamControlium/controlium-utils/commit/6ae3a379ef060367850bbd7c09fddcfa92fd92db))
+* Ensure APIUtils is exposed ([b8a227d](https://github.com/TeamControlium/controlium-utils/commit/b8a227d799244bde8fa696062bcfe109fd97616c))
+
 ## [1.0.2-alpha.3](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.2...v1.0.2-alpha.3) (2026-04-15)
 
 
