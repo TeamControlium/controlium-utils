@@ -10,6 +10,7 @@ export type {
   LogOutputCallbackSignature,
 } from "./logger/types";
 
+export { APIUtils } from "./apiUtils/APIUtils";
 export { JsonUtils } from "./jsonUtils/jsonUtils";
 export { StringUtils } from "./stringUtils/stringUtils";
 export { Utils, ExistingFileWriteActions } from "./utils/utils";
