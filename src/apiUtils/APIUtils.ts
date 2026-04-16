@@ -126,12 +126,14 @@ export class APIUtils {
       });
 
       const responseBody = await fetchResponse.text();
+      const responseHeaders = Object.fromEntries(fetchResponse.headers.entries());
 
-      this.doResponseLogging(fetchResponse.status, fetchResponse.statusText, responseBody);
+      this.doResponseLogging(fetchResponse.status, fetchResponse.statusText, responseHeaders, responseBody);
 
       return {
         status: fetchResponse.status,
         statusMessage: fetchResponse.statusText,
+        headers: responseHeaders,
         body: responseBody,
       };
     } catch (err) {
@@ -217,9 +219,20 @@ export class APIUtils {
     }
   }
 
-  private static doResponseLogging(status: number, statusText: string, body: string): void {
+  private static doResponseLogging(status: number, statusText: string, headers: Record<string, string>, body: string): void {
     Log.writeLine(LogLevels.FrameworkInformation, 'HTTP Response:-');
     Log.writeLine(LogLevels.FrameworkInformation, `  Status [${status}] - [${statusText}]`);
+    Log.writeLine(LogLevels.FrameworkInformation, '  Headers;');
+    const headerEntries = Object.entries(headers);
+    if (headerEntries.length === 0) {
+      Log.writeLine(LogLevels.FrameworkInformation, '    <No headers!>');
+    } else {
+      let headersStr = '';
+      headerEntries.forEach(([key, value]) => {
+        headersStr += `${headersStr === '' ? '' : '\n'}    "${key}": "${value}"`;
+      });
+      Log.writeLine(LogLevels.FrameworkInformation, headersStr);
+    }
     Log.writeLine(LogLevels.FrameworkInformation, '  Body;');
 
     let indented = '';
@@ -270,6 +283,7 @@ export namespace APIUtils {
   export type HTTPResponse = {
     status: number;
     statusMessage: string;
+    headers: Record<string, string>;
     body: string;
   };
 
