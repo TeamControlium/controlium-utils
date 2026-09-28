@@ -1,7 +1,7 @@
 import { STATUS_CODES } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { Utils } from '../utils/utils';
-import { JsonUtils, Log, Logger, LogLevels } from '..';
+import { Utils } from '../utils/utils.js';
+import { JsonUtils, Log, Logger, LogLevels } from '../index.js';
 
 /**
  * Static HTTP request interception and mocking utility for test suites.

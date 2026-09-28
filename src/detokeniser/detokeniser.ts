@@ -1,7 +1,7 @@
 import { addDays, addHours, addMinutes, addMonths, addYears, format, secondsToHours, secondsToMinutes } from "date-fns";
 import { formatInTimeZone, getTimezoneOffset } from "date-fns-tz";
 
-import { JsonUtils, Log, LogLevels, StringUtils, Utils } from "../index";
+import { JsonUtils, Log, LogLevels, StringUtils, Utils } from "../index.js";
 
 // ─── PublicHolidays stub ─────────────────────────────────────────────────────
 // TODO: Replace with a real import when a PublicHolidays module is provided by the consumer.

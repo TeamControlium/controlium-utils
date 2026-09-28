@@ -5,7 +5,7 @@ import {
   WriteLineOptions,
   Options,
   LogOutputCallbackSignature
-} from "./types";
+} from "./types.js";
 
 // ----------------------------
 // Module-level defaults

@@ -1,5 +1,5 @@
-import { Mock } from "./mock";
-import { Logger } from "../logger/logger";
+import { Mock } from "./mock.js";
+import { Logger } from "../logger/logger.js";
 
 beforeAll(() => {
   Logger.logToConsole = false;

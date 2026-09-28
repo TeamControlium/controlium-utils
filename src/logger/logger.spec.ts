@@ -1,5 +1,5 @@
 import { MockInstance } from 'vitest';
-import { Logger } from "./logger";
+import { Logger } from "./logger.js";
 import { readFileSync } from "fs";
 
 // =============================================================================

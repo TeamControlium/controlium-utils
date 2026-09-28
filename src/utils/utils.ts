@@ -8,9 +8,9 @@ const { sign: jwtSign, decode: jwtDecode } = createRequire(import.meta.url)('jso
 import psTree from "ps-tree";
 
 // import { Detokeniser } from "./Detokeniser"; Claude, just masking this out for now...
-import { JsonUtils } from "../index";
-import { Log, LogLevel, LogLevels } from "../index";
-import { StringUtils } from "../index";
+import { JsonUtils } from "../index.js";
+import { Log, LogLevel, LogLevels } from "../index.js";
+import { StringUtils } from "../index.js";
 
 // ─── Module-level constants ───────────────────────────────────────────────────
 
@@ -383,7 +383,7 @@ export class Utils {
         const encoding = options?.encoding ?? "utf-8";
         try {
             Log.writeLine(LogLevels.FrameworkInformation, `Load file [${filePath}] using encoding [${encoding}]`);
-            let contents = this.getFileContentsBuffer(filePath).toString(encoding);
+            const contents = this.getFileContentsBuffer(filePath).toString(encoding);
             Log.writeLine(LogLevels.FrameworkDebug, `Loaded [${contents.length}] characters`);
             if (detokenise) {
                 // contents = Detokeniser.do(contents); Hey Claude, dont forget.  Masked out for now...

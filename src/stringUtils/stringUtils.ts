@@ -1,5 +1,5 @@
-import { JsonUtils, Log, LogLevels } from "../index";
-import { Utils } from "../utils/utils";
+import { JsonUtils, Log, LogLevels } from "../index.js";
+import { Utils } from "../utils/utils.js";
 
 /**
  * General String related test-related utilities.

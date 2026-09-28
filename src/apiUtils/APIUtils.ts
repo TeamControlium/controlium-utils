@@ -1,6 +1,6 @@
 import { Agent, Headers, ProxyAgent, fetch } from 'undici';
 
-import { Log, LogLevels, Utils } from '../index';
+import { Log, LogLevels, Utils } from '../index.js';
 
 export class APIUtils {
 

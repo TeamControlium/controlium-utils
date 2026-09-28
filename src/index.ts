@@ -1,4 +1,4 @@
-import { Logger } from "./logger/logger";
+import { Logger } from "./logger/logger.js";
 
 export { Logger, Logger as Log };
 export const LogLevels = Logger.Levels;
@@ -8,12 +8,12 @@ export type {
   VideoOptions,
   WriteLineOptions,
   LogOutputCallbackSignature,
-} from "./logger/types";
+} from "./logger/types.js";
 
-export { APIUtils } from "./apiUtils/APIUtils";
-export { JsonUtils } from "./jsonUtils/jsonUtils";
-export { StringUtils } from "./stringUtils/stringUtils";
-export { Utils, ExistingFileWriteActions } from "./utils/utils";
-export type { AssertTypeMap, ActionAndParams } from "./utils/utils";
+export { APIUtils } from "./apiUtils/APIUtils.js";
+export { JsonUtils } from "./jsonUtils/jsonUtils.js";
+export { StringUtils } from "./stringUtils/stringUtils.js";
+export { Utils, ExistingFileWriteActions } from "./utils/utils.js";
+export type { AssertTypeMap, ActionAndParams } from "./utils/utils.js";
 
-export { Mock } from "./mock/mock";
+export { Mock } from "./mock/mock.js";
