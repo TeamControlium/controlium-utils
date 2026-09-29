@@ -1050,7 +1050,11 @@ export class Logger {
   private static assertParamType(value: unknown, expectedType: "string" | "number", funcName: string, paramName: string): void {
     if (typeof value !== expectedType) {
       const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
-      Logger.writeLine(this.Levels.Error, errorText);
+      // stackOffset: 1 — generic helper reused from writeLine/attach*/loggingLevelDescription;
+      // report the caller, not this. (When called from writeLine validating its own params,
+      // this still lands one frame short of the true external caller — an accepted limitation,
+      // consistent with how Utils.assertType/JsonUtils.assertObject apply the same +1 convention.)
+      Logger.writeLine(this.Levels.Error, errorText, { stackOffset: 1 });
       throw new Error(errorText);
     }
   }

@@ -58,6 +58,26 @@ export interface AssertTypeMap {
     function: (...args: unknown[]) => unknown;
 }
 
+/**
+ * Maps named shape/range constraints to their corresponding TypeScript types.
+ * Used by {@link Utils.assertShape} to provide type narrowing after assertion.
+ *
+ * Deliberately a separate map from {@link AssertTypeMap} rather than folded into it —
+ * `assertType`'s key selects a raw `typeof` result; these keys select a *constraint*
+ * layered on top of a type (non-emptiness, range, non-null-ness). Mixing the two concerns
+ * into one map would make `assertType`'s single parameter do two jobs at once.
+ */
+export interface AssertShapeMap {
+    /** Non-null, non-array object — safe to spread or read named properties off. */
+    nonNullObject: object;
+    /** Non-empty string (`length > 0`). */
+    nonEmptyString: string;
+    /** Finite number greater than zero. */
+    positiveNumber: number;
+    /** Integer in the valid TCP port range (1–65535). */
+    port: number;
+}
+
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
 /**
@@ -117,8 +137,56 @@ export class Utils {
     public static assertType<K extends keyof AssertTypeMap>(value: unknown, expectedType: K, funcName: string, paramName: string): asserts value is AssertTypeMap[K] {
         if (typeof value !== expectedType) {
             const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${Utils.describeValue(value)}]`;
-            Log.writeLine(LogLevels.Error, errorText);
+            // stackOffset: 1 — assertType is a generic helper called from dozens of sites;
+            // its own location is never useful, only the caller whose check actually failed.
+            Log.writeLine(LogLevels.Error, errorText, { stackOffset: 1 });
             throw new Error(errorText);
+        }
+    }
+
+    /**
+     * Asserts that a value matches a named shape/range constraint, throwing a logged error if
+     * not. After a successful call, TypeScript narrows `value` to the corresponding type.
+     * Sibling to {@link assertType} for checks that need more than a raw `typeof` match —
+     * see {@link AssertShapeMap} for why this is a separate function rather than folded into
+     * `assertType`'s map.
+     *
+     * @param value - Value to check.
+     * @param expectedShape - Named constraint to check against (e.g. `"nonEmptyString"`, `"port"`).
+     * @param funcName - Name of the calling function, used in the error message.
+     * @param paramName - Name of the parameter being checked, used in the error message.
+     * @throws {Error} If `value` does not satisfy `expectedShape`.
+     *
+     * @example
+     * Utils.assertShape(port, "port", "connect", "port");
+     * // port is now narrowed to number, and guaranteed 1-65535
+     */
+    public static assertShape<K extends keyof AssertShapeMap>(value: unknown, expectedShape: K, funcName: string, paramName: string): asserts value is AssertShapeMap[K] {
+        if (!Utils.matchesShape(value, expectedShape)) {
+            const errorText = `Cannot ${funcName} as [${paramName}] not a valid '${expectedShape}'. Is [${Utils.describeValue(value)}]`;
+            // stackOffset: 1 — same generic-helper reasoning as assertType (see there).
+            Log.writeLine(LogLevels.Error, errorText, { stackOffset: 1 });
+            throw new Error(errorText);
+        }
+    }
+
+    private static matchesShape(value: unknown, expectedShape: keyof AssertShapeMap): boolean {
+        switch (expectedShape) {
+            case 'nonNullObject':
+                return value !== null && typeof value === 'object' && !Array.isArray(value);
+            case 'nonEmptyString':
+                return typeof value === 'string' && value.length > 0;
+            case 'positiveNumber':
+                return typeof value === 'number' && Number.isFinite(value) && value > 0;
+            case 'port':
+                return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535;
+            default:
+                // Compile-time exhaustiveness check: if AssertShapeMap gains a key without a
+                // matching case above, this line fails to compile. Also the runtime fallback
+                // for a JS caller passing an expectedShape value TypeScript didn't catch —
+                // fail closed (treat as non-matching) rather than silently passing.
+                expectedShape satisfies never;
+                return false;
         }
     }
 
@@ -192,6 +260,41 @@ export class Utils {
         } catch {
             return String(err);
         }
+    }
+
+    /**
+     * Safely serializes a value to a bounded-length string for inclusion in a log/error
+     * message. Never throws — a circular reference, a `BigInt`, or any other
+     * `JSON.stringify` failure falls back to {@link describeValue} instead of crashing the
+     * caller. Output longer than `maxLength` is truncated with a marker showing the true
+     * length, so a large payload (an oversized response body, a header object with a huge
+     * value, ...) can never dump unbounded content into a log — the same size-bounding
+     * principle {@link describeValue} applies, extended to values that need to be shown
+     * (not just described) but still can't be trusted to be small.
+     *
+     * @param value - Value to serialize.
+     * @param options - Optional settings:
+     *   - `maxLength` — Maximum length of the returned string before truncation (default: `1000`).
+     *     Falls back to the default if not a positive finite number.
+     * @returns A bounded-length JSON string, or a safe fallback description if serialization fails.
+     *
+     * @example
+     * Utils.safeStringify({ a: 1 }); // '{"a":1}'
+     * Utils.safeStringify(circularObj); // '<unable to stringify: ...> (object (Object))'
+     * Utils.safeStringify(hugeArray, { maxLength: 200 }); // '[...]... (truncated, 48213 total chars)'
+     */
+    static safeStringify(value: unknown, options?: { maxLength?: number }): string {
+        const maxLength =
+            typeof options?.maxLength === 'number' && Number.isFinite(options.maxLength) && options.maxLength > 0
+                ? options.maxLength
+                : 1000;
+        let result: string;
+        try {
+            result = JSON.stringify(value) ?? String(value);
+        } catch (err) {
+            return `<unable to stringify: ${Utils.errorMessage(err)}> (${Utils.describeValue(value)})`;
+        }
+        return result.length > maxLength ? `${result.slice(0, maxLength)}... (truncated, ${result.length} total chars)` : result;
     }
 
     /**

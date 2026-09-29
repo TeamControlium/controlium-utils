@@ -48,7 +48,7 @@ export class JsonUtils {
    * // result => { a: { c: 1 } }
    */
   static withRenamedProperty(jsonObject: object, pathToPropertyToRename: string, newName: string): object {
-    this.assertObject(jsonObject, "JsonUtils.withRenamedProperty", "jsonObject");
+    Utils.assertShape(jsonObject, "nonNullObject", "JsonUtils.withRenamedProperty", "jsonObject");
     Utils.assertType(pathToPropertyToRename, "string", "JsonUtils.withRenamedProperty", "pathToPropertyToRename");
     Utils.assertType(newName, "string", "JsonUtils.withRenamedProperty", "newName");
     const normalizedNewName = newName.trim();
@@ -93,9 +93,9 @@ export class JsonUtils {
    * // result => { a: { x: 1, y: 2 } }
    */
   static mergeObjectIntoProperty(jsonObject: object, pathToPropertyToMergeInto: string, objectToMerge: object): object {
-    this.assertObject(jsonObject, "JsonUtils.mergeObjectIntoProperty", "jsonObject");
+    Utils.assertShape(jsonObject, "nonNullObject", "JsonUtils.mergeObjectIntoProperty", "jsonObject");
     Utils.assertType(pathToPropertyToMergeInto, "string", "JsonUtils.mergeObjectIntoProperty", "pathToPropertyToMergeInto");
-    this.assertObject(objectToMerge, "JsonUtils.mergeObjectIntoProperty", "objectToMerge");
+    Utils.assertShape(objectToMerge, "nonNullObject", "JsonUtils.mergeObjectIntoProperty", "objectToMerge");
     const objectToMergeWith = this.getPropertiesMatchingPath(jsonObject, pathToPropertyToMergeInto);
     if (objectToMergeWith.length === 0) {
       const errText = `mergeJsonObjects: cannot merge - JSON Path [${pathToPropertyToMergeInto}] matches nothing`;
@@ -448,18 +448,5 @@ export class JsonUtils {
   public static escapeRegExp(toBeEscaped: string): string {
     Utils.assertType(toBeEscaped, "string", "JsonUtils.escapeRegExp", "toBeEscaped");
     return toBeEscaped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  /**
-   * Asserts that a value is a non-null, non-array plain object, throwing a logged error
-   * if not. `typeof null === "object"`, so `Utils.assertType(value, "object", ...)` alone
-   * would let `null` through — this closes that gap for JSON-object parameters.
-   */
-  private static assertObject(value: unknown, funcName: string, paramName: string): asserts value is object {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      const errText = `Cannot ${funcName} as [${paramName}] must be a non-null object. Is [${Utils.describeValue(value)}]`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
-    }
   }
 }

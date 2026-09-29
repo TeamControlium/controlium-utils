@@ -1,6 +1,6 @@
 {
   "name": "@controlium/utils",
-  "version": "1.0.2-alpha.7",
+  "version": "1.0.2-alpha.8",
   "description": "Shared utilities for Controlium-based projects",
   "type": "module",
   "author": "Team Controllium contributors",
@@ -11,6 +11,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TeamControlium/controlium-utils"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
