@@ -116,9 +116,81 @@ export class Utils {
      */
     public static assertType<K extends keyof AssertTypeMap>(value: unknown, expectedType: K, funcName: string, paramName: string): asserts value is AssertTypeMap[K] {
         if (typeof value !== expectedType) {
-            const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
+            const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${Utils.describeValue(value)}]`;
             Log.writeLine(LogLevels.Error, errorText);
             throw new Error(errorText);
+        }
+    }
+
+    /**
+     * Safely describes an arbitrary value for inclusion in an error message. Never throws itself,
+     * even for `null`, `undefined`, or hostile objects. Deliberately never includes the value's
+     * own content — only its type/shape — for two reasons: content length is unbounded (a
+     * `string` parameter could be megabytes), and content may be sensitive and must not be
+     * leaked into logs. This applies uniformly across every type, not just objects.
+     *
+     * @param value - Value to describe.
+     * @returns A human-readable description of the value's type/shape, e.g. `"string (length 5)"`,
+     * `"object (Array)"`, or `"function (myHandler)"`. Never includes the value's own content.
+     *
+     * @example
+     * Utils.describeValue(42); // "number"
+     * Utils.describeValue(null); // "null"
+     * Utils.describeValue({ a: 1 }); // "object (Object)"
+     * Utils.describeValue("hello"); // "string (length 5)"
+     */
+    static describeValue(value: unknown): string {
+        if (value === null) return 'null';
+        if (value === undefined) return 'undefined';
+        const type = typeof value;
+        if (type === 'function') {
+            try {
+                const name = (value as { name?: string }).name;
+                return `function (${name || 'anonymous'})`;
+            } catch {
+                return 'function';
+            }
+        }
+        if (type === 'object') {
+            try {
+                const ctorName = (value as object).constructor?.name;
+                return `object (${ctorName || 'Object'})`;
+            } catch {
+                return 'object';
+            }
+        }
+        if (type === 'string') {
+            try {
+                return `string (length ${(value as string).length})`;
+            } catch {
+                return 'string';
+            }
+        }
+        return type;
+    }
+
+    /**
+     * Safely extracts a human-readable message from a caught value of unknown shape. Never
+     * throws itself — in particular, a bare `(err as Error).message` cast throws a new,
+     * unrelated `TypeError` when `err` is `null`/`undefined`/a non-Error throw, masking
+     * whatever actually failed. Use this instead of that cast in every `catch` block.
+     *
+     * @param err - The caught value (from a `catch` clause, `Promise` rejection, etc.).
+     * @returns `err.message` if `err` is an `Error`; `err` itself if it's a string;
+     * otherwise a best-effort `JSON.stringify`/`String` rendering.
+     *
+     * @example
+     * try { ... } catch (err) {
+     *   Log.writeLine(LogLevels.Error, `Failed: ${Utils.errorMessage(err)}`);
+     * }
+     */
+    static errorMessage(err: unknown): string {
+        if (err instanceof Error) return err.message;
+        if (typeof err === 'string') return err;
+        try {
+            return JSON.stringify(err) ?? String(err);
+        } catch {
+            return String(err);
         }
     }
 
@@ -543,7 +615,7 @@ export class Utils {
                 }
             });
         } catch (err) {
-            const errMess = `Error resetting environment variables: ${(err as Error).message}`;
+            const errMess = `Error resetting environment variables: ${Utils.errorMessage(err)}`;
             Log.writeLine(LogLevels.Error, errMess);
             throw new Error(errMess);
         }
@@ -702,7 +774,7 @@ export class Utils {
         try {
             return jwtSign(payload, normalizedSignature, jwtHeader);
         } catch (err) {
-            const errText = `Error creating [${typeof options === 'string' ? options : JSON.stringify(options as object)}] JWT token from [${payloadData}] (signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${(err as Error).message}`;
+            const errText = `Error creating [${typeof options === 'string' ? options : JSON.stringify(options as object)}] JWT token from [${payloadData}] (signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${Utils.errorMessage(err)}`;
             Log.writeLine(LogLevels.Error, errText);
             throw new Error(errText);
         }
@@ -738,7 +810,7 @@ export class Utils {
             }
             return payload as object;
         } catch (err) {
-            const errText = `Error getting payload from JWT [${jwtToken ?? "<Undefined>"}]: ${(err as Error).message}`;
+            const errText = `Error getting payload from JWT [${jwtToken ?? "<Undefined>"}]: ${Utils.errorMessage(err)}`;
             Log.writeLine(LogLevels.Error, errText);
             throw new Error(errText);
         }
@@ -778,7 +850,7 @@ export class Utils {
                 Log.writeLine(LogLevels.TestInformation, `Background(stderr): ${data.toString()}`, { suppressAllPreamble: true });
             });
             childProcess.on('error', (err) => {
-                Log.writeLine(LogLevels.Error, `Background process error: ${(err as Error).message}`, { suppressAllPreamble: true });
+                Log.writeLine(LogLevels.Error, `Background process error: ${Utils.errorMessage(err)}`, { suppressAllPreamble: true });
             });
         }
         return childProcess;
@@ -906,7 +978,7 @@ export class Utils {
             try {
                 process.kill(pid, signal);
             } catch (err) {
-                Log.writeLine(LogLevels.Error, `Killing process [${pid}] with [${signal}] threw error (ignoring): ${(err as Error).message}`);
+                Log.writeLine(LogLevels.Error, `Killing process [${pid}] with [${signal}] threw error (ignoring): ${Utils.errorMessage(err)}`);
             }
         };
 

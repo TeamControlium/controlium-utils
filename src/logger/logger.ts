@@ -307,6 +307,9 @@ export class Logger {
     minLevel: number,
     maxLevel: number
   ): string {
+    this.assertParamType(level, "number", "Logger.loggingLevelDescription", "level");
+    this.assertParamType(minLevel, "number", "Logger.loggingLevelDescription", "minLevel");
+    this.assertParamType(maxLevel, "number", "Logger.loggingLevelDescription", "maxLevel");
     const currentLevelText = this.levelToText(level);
     const preamble = this.options.panicMode
       ? this.options.panicDescriptorPreamble
@@ -479,6 +482,12 @@ export class Logger {
     logLevel: number,
     screenshot: Buffer | string
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attachScreenshot", "logLevel");
+    if (!Buffer.isBuffer(screenshot) && typeof screenshot !== "string") {
+      const errorText = `Cannot Logger.attachScreenshot as [screenshot] must be a Buffer or string. Is [${typeof screenshot}]`;
+      Logger.writeLine(this.Levels.Error, errorText);
+      throw new Error(errorText);
+    }
     if (this.logLevelOk(logLevel)) {
       if (typeof screenshot === "string") {
         screenshot = Buffer.from(screenshot).toString("base64");
@@ -504,6 +513,8 @@ export class Logger {
    * Logger.attachHTML(Logger.Levels.TestInformation, "<b>Test passed</b>");
    */
   public static attachHTML(logLevel: number, htmlString: string): void {
+    this.assertParamType(logLevel, "number", "Logger.attachHTML", "logLevel");
+    this.assertParamType(htmlString, "string", "Logger.attachHTML", "htmlString");
     this.attach(logLevel, htmlString, "text/html");
   }
 
@@ -528,12 +539,14 @@ export class Logger {
     videoFilePath: string,
     options: VideoOptions = this.videoOptions
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attachVideoFile", "logLevel");
+    this.assertParamType(videoFilePath, "string", "Logger.attachVideoFile", "videoFilePath");
     if (this.logLevelOk(logLevel)) {
       let videoBuffer: Buffer;
       try {
         videoBuffer = readFileSync(videoFilePath);
       } catch (err) {
-        const errText = `Error thrown reading video data from given file path:-\n${(err as Error).message}`;
+        const errText = `Error thrown reading video data from given file path:-\n${this.errorMessage(err)}`;
         this.processError(errText);
         return;
       }
@@ -563,6 +576,12 @@ export class Logger {
     video: Buffer,
     options?: VideoOptions
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attachVideo", "logLevel");
+    if (!Buffer.isBuffer(video)) {
+      const errorText = `Cannot Logger.attachVideo as [video] must be a Buffer. Is [${typeof video}]`;
+      Logger.writeLine(this.Levels.Error, errorText);
+      throw new Error(errorText);
+    }
     const actualOptions =
       options == null
         ? this.options.video
@@ -605,12 +624,17 @@ export class Logger {
     dataString: string,
     mediaType: string
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attach", "logLevel");
+    // Note: dataString is deliberately not type-checked here — attach() tolerates
+    // non-string payloads (see truncateForDisplay), so callback errors can still
+    // describe what was actually passed instead of crashing before reaching it.
+    this.assertParamType(mediaType, "string", "Logger.attach", "mediaType");
     if (this.logLevelOk(logLevel)) {
       if (typeof this.logOutputCallback === "function") {
         try {
           this.logOutputCallback(dataString, mediaType);
         } catch (err) {
-          const errText = `Error thrown from Log Output Callback:-\n${(err as Error).message}\nwhen called with data string:-\n${this.truncateForDisplay(dataString)}\nand mediaType:-\n${this.truncateForDisplay(mediaType)}`;
+          const errText = `Error thrown from Log Output Callback:-\n${this.errorMessage(err)}\nwhen called with data string:-\n${this.truncateForDisplay(dataString)}\nand mediaType:-\n${this.truncateForDisplay(mediaType)}`;
           this.processError(errText);
         }
       } else {
@@ -653,6 +677,8 @@ export class Logger {
     textString: string,
     options?: WriteLineOptions
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.writeLine", "logLevel");
+    this.assertParamType(textString, "string", "Logger.writeLine", "textString");
     const stackObj: unknown = {};
     Error.captureStackTrace(stackObj as object, this.writeLine);
     const stack = (stackObj as Error)?.stack ?? "[Unknown]";
@@ -877,7 +903,7 @@ export class Logger {
           this.logOutputCallback!(textToWrite);
           doneCallbackWrite = true;
         } catch (err) {
-          const errText = `Error thrown from Log Output Callback during writeLine:-\n${(err as Error).message}`;
+          const errText = `Error thrown from Log Output Callback during writeLine:-\n${this.errorMessage(err)}`;
           // Avoid infinite recursion: log directly to console rather than calling processError -> writeLine
           console.error(errText);
           if (this.options.throwErrorIfLogOutputFails) {
@@ -1012,6 +1038,38 @@ export class Logger {
       passedInLogLevel >= this.options.filterMinCurrentLevel &&
       passedInLogLevel <= this.options.filterMaxCurrentLevel;
     return withinCurrentLevel || withinFilterRange;
+  }
+
+  /**
+   * Local equivalent of `Utils.assertType`, duplicated for the same reason as
+   * {@link errorMessage} below — `Logger` sits below `Utils` in the module dependency
+   * graph and must not import it back. Throws a logged error if `value` isn't of
+   * `expectedType`; the caller cannot be trusted to have actually passed what its
+   * TypeScript signature promises.
+   */
+  private static assertParamType(value: unknown, expectedType: "string" | "number", funcName: string, paramName: string): void {
+    if (typeof value !== expectedType) {
+      const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
+      Logger.writeLine(this.Levels.Error, errorText);
+      throw new Error(errorText);
+    }
+  }
+
+  /**
+   * Safely extracts a human-readable message from a caught value of unknown shape, without
+   * throwing itself (a bare `(err as Error).message` cast throws a new, unrelated `TypeError`
+   * when `err` isn't actually an `Error`, masking the original failure). Duplicated from
+   * `Utils.errorMessage` rather than imported — `Logger` sits below `Utils` in the module
+   * dependency graph and must not import it back.
+   */
+  private static errorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (typeof err === "string") return err;
+    try {
+      return JSON.stringify(err) ?? String(err);
+    } catch {
+      return String(err);
+    }
   }
 
   private static processError(errorText: string): void {

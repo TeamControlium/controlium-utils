@@ -18,6 +18,8 @@ export class APIUtils {
    * response then it is assumed nothing listening
    */
   public static async isWebServerListening(url: string, timeoutMS: number): Promise<boolean> {
+    Utils.assertType(url, "string", "APIUtils.isWebServerListening", "url");
+    Utils.assertType(timeoutMS, "number", "APIUtils.isWebServerListening", "timeoutMS");
     try {
       await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(timeoutMS) });
       return true;
@@ -27,15 +29,17 @@ export class APIUtils {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const agg = err as { errors: any[] };
         for (const e of agg.errors) {
-          Log.writeLine(LogLevels.FrameworkInformation, `Error:\n${e.code} (${e.message})`);
-          if (e.message.includes('ECONNREFUSED')) {
+          const message = Utils.errorMessage(e);
+          Log.writeLine(LogLevels.FrameworkInformation, `Error:\n${e?.code ?? 'no code'} (${message})`);
+          if (message.includes('ECONNREFUSED')) {
             return false;
           }
         }
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        Log.writeLine(LogLevels.FrameworkInformation, `Error:\n${(err as any)['code'] ?? 'no code'} (${(err as Error).message})`);
-        if ((err as Error).message.includes('ECONNREFUSED')) {
+        const message = Utils.errorMessage(err);
+        const code = (err as { code?: unknown } | null)?.code;
+        Log.writeLine(LogLevels.FrameworkInformation, `Error:\n${code ?? 'no code'} (${message})`);
+        if (message.includes('ECONNREFUSED')) {
           return false;
         }
       }
@@ -60,6 +64,9 @@ export class APIUtils {
    * URL is polled
    */
   public static async waitForWebServerListening(url: string, maxSecondsToWait: number, { maxResponseTimeMS = 1000 }: { maxResponseTimeMS?: number } = {}): Promise<boolean> {
+    Utils.assertType(url, "string", "APIUtils.waitForWebServerListening", "url");
+    Utils.assertType(maxSecondsToWait, "number", "APIUtils.waitForWebServerListening", "maxSecondsToWait");
+    Utils.assertType(maxResponseTimeMS, "number", "APIUtils.waitForWebServerListening", "maxResponseTimeMS");
     const pollIntervalMs = 500;
     Log.writeLine(LogLevels.TestInformation, `Waiting for AUT at ${url} to become available (overall timeout: ${maxSecondsToWait} seconds)...`);
     const startTime = Date.now();
@@ -92,6 +99,25 @@ export class APIUtils {
   ): Promise<APIUtils.HTTPResponse> {
     const API_DEFAULT_TIMEOUT = 10000;
     let dispatcher: Agent | ProxyAgent | undefined;
+
+    if (Utils.isNullOrUndefined(httpRequest) || typeof httpRequest !== 'object') {
+      const errText = `Cannot APIUtils.performHTTPOperation as [httpRequest] must be a non-null object. Is [${Utils.describeValue(httpRequest)}]`;
+      Log.writeLine(LogLevels.Error, errText);
+      throw new Error(errText);
+    }
+    Utils.assertType(httpRequest.protocol, "string", "APIUtils.performHTTPOperation", "httpRequest.protocol");
+    if (httpRequest.protocol !== 'http' && httpRequest.protocol !== 'https') {
+      const errText = `Cannot APIUtils.performHTTPOperation as [httpRequest.protocol] must be 'http' or 'https'. Is [${Utils.describeValue(httpRequest.protocol)}]`;
+      Log.writeLine(LogLevels.Error, errText);
+      throw new Error(errText);
+    }
+    Utils.assertType(httpRequest.host, "string", "APIUtils.performHTTPOperation", "httpRequest.host");
+    Utils.assertType(httpRequest.resourcePath, "string", "APIUtils.performHTTPOperation", "httpRequest.resourcePath");
+    if (Utils.isNullOrUndefined(httpRequest.headers) || typeof httpRequest.headers !== 'object') {
+      const errText = `Cannot APIUtils.performHTTPOperation as [httpRequest.headers] must be a non-null object. Is [${Utils.describeValue(httpRequest.headers)}]`;
+      Log.writeLine(LogLevels.Error, errText);
+      throw new Error(errText);
+    }
 
     try {
       if (Utils.isNullOrUndefined(httpRequest.timeout)) {

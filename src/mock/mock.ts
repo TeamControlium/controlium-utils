@@ -176,7 +176,7 @@ export class Mock {
       try {
         JsonUtils.getMatchingJSONPropertyCount({}, matcher);
       } catch (e) {
-        Mock.throwError('addListener', `Matcher item [${index}] is not valid JSONPath syntax: "${matcher}". ${(e as Error).message}`);
+        Mock.throwError('addListener', `Matcher item [${index}] is not valid JSONPath syntax: "${matcher}". ${Utils.errorMessage(e)}`);
       }
     });
 
@@ -494,7 +494,7 @@ export class Mock {
             }
             return false;
           } catch (e) {
-            Log.writeLine(LogLevels.Warning, `Mock: JSONPath evaluation error in listener <${listener.name}> for path "${matcher}": ${(e as Error).message} — treating as non-match`);
+            Log.writeLine(LogLevels.Warning, `Mock: JSONPath evaluation error in listener <${listener.name}> for path "${matcher}": ${Utils.errorMessage(e)} — treating as non-match`);
             return false;
           }
         });
@@ -504,7 +504,7 @@ export class Mock {
           Logger.writeLine(LogLevels.FrameworkDebug, 'No matches');
         }
       } catch (e) {
-        Log.writeLine(LogLevels.Warning, `Mock: Unexpected error evaluating listener <${listener.name}>: ${(e as Error).message} — skipping`);
+        Log.writeLine(LogLevels.Warning, `Mock: Unexpected error evaluating listener <${listener.name}>: ${Utils.errorMessage(e)} — skipping`);
       }
     }
     return undefined;
@@ -529,7 +529,7 @@ export class Mock {
       Log.writeLine(LogLevels.FrameworkDebug, `Mock.fetchReal: received ${response.status} from ${request.url}`);
       return { status: response.status, headers, body };
     } catch (e) {
-      const message = (e as Error).message;
+      const message = Utils.errorMessage(e);
       Log.writeLine(LogLevels.Error, `Mock.fetchReal: network error fetching ${request.url}: ${message}`);
       return { status: 502, headers: {}, body: `Mock passthrough network error: ${message}` };
     }

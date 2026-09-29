@@ -232,6 +232,7 @@ export class Detokeniser {
    * @see {@link Detokeniser.doAsync} for async token resolution
    */
   public static addCallback(callback: Detokeniser.Callback) {
+    Utils.assertType(callback, "function", "Detokeniser.addCallback", "callback");
     if (!this._callbacks) {
       this._callbacks = new Array<Detokeniser.Callback>();
     }
@@ -281,6 +282,7 @@ export class Detokeniser {
   public static do(tokenisedString: string, options: Detokeniser.DoOptions = {}): string {
     let deEscape = true;
     try {
+      Utils.assertType(tokenisedString, "string", "Detokeniser.do", "tokenisedString");
       const runningString = this.doPreamble(tokenisedString);
 
       // Loop until last token find found no tokens
@@ -312,7 +314,7 @@ export class Detokeniser {
       runningString.outputString = this.doDeEscapesIfRequired(tokenisedString, deEscape, runningString.outputString);
       return runningString.outputString;
     } catch (err: unknown) {
-      const errText = `Error processing [${tokenisedString}]: ${typeof err === "string" ? err : err instanceof Error ? err.message : "<unknown>"}`;
+      const errText = `Error processing [${tokenisedString}]: ${Utils.errorMessage(err)}`;
       Log.writeLine(LogLevels.Error, errText);
       throw Error(errText);
     }
@@ -350,6 +352,7 @@ export class Detokeniser {
     let deEscape = true;
 
     try {
+      Utils.assertType(tokenisedString, "string", "Detokeniser.doAsync", "tokenisedString");
       const runningString = this.doPreamble(tokenisedString);
 
       // Loop until last token find found no tokens
@@ -375,7 +378,7 @@ export class Detokeniser {
       runningString.outputString = this.doDeEscapesIfRequired(tokenisedString, deEscape, runningString.outputString);
       return runningString.outputString;
     } catch (err: unknown) {
-      const errText = `Error processing [${tokenisedString}]: ${typeof err === "string" ? err : err instanceof Error ? err.message : "<unknown>"}`;
+      const errText = `Error processing [${tokenisedString}]: ${Utils.errorMessage(err)}`;
       Log.writeLine(LogLevels.Error, errText);
       throw Error(errText);
     }
@@ -573,10 +576,16 @@ export class Detokeniser {
    * Detokeniser.doBase64('SGVsbG8gV29ybGQ=', 'decode'); // → 'Hello World'
    */
   public static doBase64(original: string, direction: "encode" | "decode"): string {
+    Utils.assertType(original, "string", "Detokeniser.doBase64", "original");
+    if (direction !== "encode" && direction !== "decode") {
+      const errText = `Cannot Detokeniser.doBase64 as [direction] must be 'encode' or 'decode'. Is [${Utils.describeValue(direction)}]`;
+      Log.writeLine(LogLevels.Error, errText);
+      throw new Error(errText);
+    }
     try {
       return direction == "encode" ? Buffer.from(original).toString("base64") : Buffer.from(original, "base64").toString();
     } catch (err) {
-      const errText = `Converting:\n[${original}]\n  ${direction == "encode" ? "to" : "from"} base64:\n {${(err as Error).message}}`;
+      const errText = `Converting:\n[${original}]\n  ${direction == "encode" ? "to" : "from"} base64:\n {${Utils.errorMessage(err)}}`;
       Log.writeLine(LogLevels.Error, errText);
       throw new Error(errText);
     }
