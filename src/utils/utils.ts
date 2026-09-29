@@ -5,7 +5,8 @@ import path from "path";
 import { decodeHTML } from "entities";
 import { createRequire } from 'module';
 const { sign: jwtSign, decode: jwtDecode } = createRequire(import.meta.url)('jsonwebtoken') as typeof import('jsonwebtoken');
-import psTree from "ps-tree";
+import treeKill from "tree-kill";
+import picomatch from "picomatch";
 
 // import { Detokeniser } from "./Detokeniser"; Claude, just masking this out for now...
 import { JsonUtils } from "../index.js";
@@ -392,9 +393,8 @@ export class Utils {
      * Utils.pad("42", 5); // => "00042"
      */
     static pad(num: number | string, requiredMinimumLength: number): string {
-        let numString = typeof num === "number" ? num.toString() : num;
-        while (numString.length < requiredMinimumLength) numString = "0" + numString;
-        return numString;
+        const numString = typeof num === "number" ? num.toString() : num;
+        return numString.padStart(requiredMinimumLength, "0");
     }
 
     /**
@@ -745,73 +745,40 @@ export class Utils {
     }
 
     /**
-     * Converts a URL glob pattern to an equivalent `RegExp`.
-     *
-     * Supported glob syntax:
-     * - `*` — matches any sequence of non-`/` characters
-     * - `**` — matches any path segment sequence (including `/`)
-     * - `?` — matches any single character
-     * - `{a,b}` — matches either `a` or `b`
-     * - `[...]` — character class, passed through as-is
+     * Converts a URL glob pattern to an equivalent `RegExp`. Thin, logged wrapper around
+     * `picomatch` — see https://github.com/micromatch/picomatch for the full supported syntax
+     * (including `*`, `**`, `?`, `{a,b}`, character classes, extglobs, and `!` negation).
      *
      * @param glob - The glob pattern to convert.
      * @param options - Optional anchoring flags:
      *   - `startOfLine` — Anchors the pattern to the start of the string (default: `true`).
      *   - `endOfLine` — Anchors the pattern to the end of the string (default: `true`).
      * @returns A `RegExp` equivalent to the given glob.
+     * @throws {Error} If `glob` is not a string, or if `picomatch` cannot convert it.
      *
      * @example
      * Utils.globToRegex("src/**\/*.ts").test("src/foo/bar.ts"); // true
      */
     static globToRegex(glob: string, options?: { startOfLine: boolean; endOfLine: boolean }): RegExp {
+        Utils.assertType(glob, "string", "Utils.globToRegex", "glob");
         const startOfLine = options?.startOfLine ?? true;
         const endOfLine = options?.endOfLine ?? true;
-        const charsToEscape = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
-        const regexExpression = startOfLine ? ["^"] : ["^.*"];
-        let inRegexpGroup = false;
 
-        for (let globCharIndex = 0; globCharIndex < glob.length; ++globCharIndex) {
-            const currentGlobChar = glob[globCharIndex];
-
-            if (currentGlobChar === "\\" && globCharIndex + 1 < glob.length) {
-                const nextGlobChar = glob[++globCharIndex];
-                regexExpression.push(charsToEscape.has(nextGlobChar) ? "\\" + nextGlobChar : nextGlobChar);
-                continue;
-            }
-
-            if (currentGlobChar === "*") {
-                const previousGlobChar = glob[globCharIndex - 1];
-                let starCount = 1;
-                while (glob[globCharIndex + 1] === "*") {
-                    starCount++;
-                    globCharIndex++;
-                }
-                const nextGlobChar = glob[globCharIndex + 1];
-                if (starCount > 1 && (previousGlobChar === "/" || previousGlobChar === undefined) && (nextGlobChar === "/" || nextGlobChar === undefined)) {
-                    // eslint-disable-next-line no-useless-escape
-                    regexExpression.push("((?:[^/]*(?:/|$))*)");
-                    globCharIndex++;
-                } else {
-                    regexExpression.push("([^/]*)");
-                }
-                continue;
-            }
-
-            switch (currentGlobChar) {
-                case "?":  regexExpression.push("."); break;
-                case "[":  regexExpression.push("["); break;
-                case "]":  regexExpression.push("]"); break;
-                case "{":  inRegexpGroup = true;  regexExpression.push("("); break;
-                case "}":  inRegexpGroup = false; regexExpression.push(")"); break;
-                case ",":
-                    regexExpression.push(inRegexpGroup ? "|" : "\\" + currentGlobChar);
-                    break;
-                default:
-                    regexExpression.push(charsToEscape.has(currentGlobChar) ? "\\" + currentGlobChar : currentGlobChar);
-            }
+        try {
+            const picomatchRegex = picomatch.makeRe(glob);
+            // picomatch always anchors its output as `^...$` — strip those so we can apply
+            // this function's own (asymmetric, independently-toggleable) anchoring instead.
+            let corePattern = picomatchRegex.source;
+            if (corePattern.startsWith("^")) corePattern = corePattern.slice(1);
+            if (corePattern.endsWith("$")) corePattern = corePattern.slice(0, -1);
+            const prefix = startOfLine ? "^" : "^.*";
+            const suffix = endOfLine ? "$" : ".*$";
+            return new RegExp(prefix + corePattern + suffix, picomatchRegex.flags);
+        } catch (err) {
+            const errText = `Cannot Utils.globToRegex as [glob] is not a valid glob pattern. Is [${Utils.describeValue(glob)}]: ${Utils.errorMessage(err)}`;
+            Log.writeLine(LogLevels.Error, errText);
+            throw new Error(errText);
         }
-        regexExpression.push(endOfLine ? "$" : ".*$");
-        return new RegExp(regexExpression.join(""));
     }
 
     // ── HTML ──────────────────────────────────────────────────────────────────
@@ -1052,40 +1019,30 @@ export class Utils {
     }
 
     /**
-     * Sends a signal to a process and all of its descendants, leaf-first (post-order traversal).
+     * Sends a signal to a process and all of its descendants. Thin, logged wrapper around
+     * `tree-kill` — chosen over a hand-rolled `ps`-tree-walk because it also handles Windows
+     * correctly (via `taskkill /T /F`), where POSIX signals don't translate the way
+     * `process.kill(pid, signal)` alone would assume.
+     *
+     * Individual kill failures (e.g. a descendant that already exited in a race) are logged
+     * but do not reject the returned promise — this is a best-effort cleanup operation, and a
+     * benign race during teardown should never mask the actual test failure by throwing.
      *
      * @param rootPid - PID of the root process to terminate.
-     * @param signal - Signal to send (default: `"SIGKILL"`).
+     * @param signal - Signal to send (default: `"SIGKILL"`). Ignored on Windows — `taskkill /F`
+     *   is unconditional there, matching `tree-kill`'s own platform behaviour.
+     * @throws {Error} If `rootPid` is not a number.
      */
     static async killProcessAndDescendants(rootPid: number, signal: NodeJS.Signals = 'SIGKILL'): Promise<void> {
-        type PS = { PID: string; PPID: string; COMMAND: string };
-
-        const children: PS[] = await new Promise((resolve, reject) => {
-            psTree(rootPid, (err, result) => {
-                if (err) return reject(err);
-                resolve([...result]);
+        Utils.assertType(rootPid, "number", "Utils.killProcessAndDescendants", "rootPid");
+        return new Promise((resolve) => {
+            treeKill(rootPid, signal, (err) => {
+                if (err) {
+                    Log.writeLine(LogLevels.Error, `Killing process tree rooted at [${rootPid}] with [${signal}] threw error (ignoring): ${Utils.errorMessage(err)}`);
+                }
+                resolve();
             });
         });
-
-        const tree = new Map<number, number[]>();
-        for (const proc of children) {
-            const pid = Number(proc.PID);
-            const ppid = Number(proc.PPID);
-            if (!tree.has(ppid)) tree.set(ppid, []);
-            tree.get(ppid)!.push(pid);
-        }
-
-        const killRecursively = (pid: number) => {
-            const childPids = tree.get(pid) ?? [];
-            for (const childPid of childPids) killRecursively(childPid);
-            try {
-                process.kill(pid, signal);
-            } catch (err) {
-                Log.writeLine(LogLevels.Error, `Killing process [${pid}] with [${signal}] threw error (ignoring): ${Utils.errorMessage(err)}`);
-            }
-        };
-
-        killRecursively(rootPid);
     }
 
     /**

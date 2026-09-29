@@ -1,4 +1,4 @@
-import { JsonUtils, Log, LogLevels } from "../index.js";
+import { Log, LogLevels } from "../index.js";
 import { Utils } from "../utils/utils.js";
 
 /**
@@ -290,11 +290,12 @@ export class StringUtils {
   static replaceAll(original: string, searchValue: string, replaceValue: string): string {
     if (Utils.isNullOrUndefined(original)) {
       const errText = `Cannot replace [${searchValue}] with [${replaceValue}] Original is null or undefined!`;
-      Log.writeLine(LogLevels.Error,errText);
+      Log.writeLine(LogLevels.Error,errText, {stackOffset: 1});
       throw new Error(errText);
     }
-    const escapedRegExp = new RegExp(JsonUtils.escapeRegExp(searchValue),'g');
-    return original.replace(escapedRegExp, replaceValue);
+    // Native String.prototype.replaceAll (ES2021+, safe given this package's Node >=22 floor)
+    // treats searchValue as a literal, not a pattern — no manual regex/escaping needed.
+    return original.replaceAll(searchValue, replaceValue);
   }
 
   /**

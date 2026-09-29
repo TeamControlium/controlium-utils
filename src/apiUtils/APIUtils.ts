@@ -163,7 +163,7 @@ export class APIUtils {
         body: responseBody,
       };
     } catch (err) {
-      Log.writeLine(LogLevels.Error, `HTTP OPERATION ERROR: ${err}`);
+      Log.writeLine(LogLevels.Error, `HTTP OPERATION ERROR: ${Utils.errorMessage(err)}`);
       throw err;
     } finally {
       await dispatcher?.close();
@@ -171,23 +171,17 @@ export class APIUtils {
   }
 
   private static buildURL(httpRequest: APIUtils.HTTPRequest): string {
-    let builtUrl = httpRequest.protocol;
-    builtUrl += '://';
-    builtUrl += httpRequest.host.endsWith('/')
-      ? httpRequest.host.substring(0, httpRequest.host.length - 1)
-      : httpRequest.host;
-    builtUrl += '/';
-    builtUrl += httpRequest.resourcePath.startsWith('/')
-      ? httpRequest.resourcePath.substring(1, httpRequest.resourcePath.length)
-      : httpRequest.resourcePath;
+    // Strip ALL leading slashes (not just one) before resolving as a relative reference.
+    // A resourcePath starting with "//" would otherwise be parsed by URL as a network-path
+    // reference (RFC 3986) — silently replacing the *host* rather than staying a literal
+    // path. resourcePath is always meant to be a path fragment, never host-changing.
+    const normalizedResourcePath = httpRequest.resourcePath.replace(/^\/+/, '');
+    const url = new URL(normalizedResourcePath, `${httpRequest.protocol}://${httpRequest.host}`);
     if (!Utils.isNullOrUndefined(httpRequest.queryString)) {
       const queryString = httpRequest.queryString as string;
-      builtUrl += '?';
-      builtUrl += queryString.startsWith('?')
-        ? queryString.substring(1, queryString.length)
-        : queryString;
+      url.search = queryString.startsWith('?') ? queryString.substring(1) : queryString;
     }
-    return builtUrl;
+    return url.toString();
   }
 
   private static buildDispatcher(httpRequest: APIUtils.HTTPRequest): Agent | ProxyAgent {

@@ -949,14 +949,6 @@ export class Logger {
    * Left-pads a number (or numeric string) with zeroes to reach the required minimum length.
    * Kept private and self-contained so `logger.ts` has no external utility dependencies.
    */
-  private static pad(num: number, requiredMinimumLength: number): string {
-    let numString = num.toString();
-    while (numString.length < requiredMinimumLength) {
-      numString = "0" + numString;
-    }
-    return numString;
-  }
-
   private static getWriteTypeString(levelOfWrite: number): string {
     switch (levelOfWrite) {
       case this.Levels.Error:
@@ -972,7 +964,7 @@ export class Logger {
       case this.Levels.TestInformation:
         return "TSINF";
       default:
-        return this.pad(levelOfWrite, WRITE_TYPE_PAD_WIDTH);
+        return String(levelOfWrite).padStart(WRITE_TYPE_PAD_WIDTH, "0");
     }
   }
 
