@@ -1,5 +1,5 @@
-import { JsonUtils, Log, LogLevels } from "../index";
-import { Utils } from "../utils/utils";
+import { Log, LogLevels } from "../index.js";
+import { Utils } from "../utils/utils.js";
 
 /**
  * General String related test-related utilities.
@@ -62,8 +62,7 @@ export class StringUtils {
 
     if (stringToCheck.length - 1 < indexZeroBased) {
       const errorText = `Cannot check if char [${indexZeroBased} (Zero based)] isAlpha as length of stringToCheck is only ${stringToCheck.length} characters long!`;
-      Log.writeLine(LogLevels.Error, errorText);
-      throw new Error(errorText);
+      Log.logErrorAndThrow(errorText);
     }
     return stringToCheck.charAt(indexZeroBased).toLowerCase() !== stringToCheck.charAt(indexZeroBased).toUpperCase();
   }
@@ -115,8 +114,7 @@ export class StringUtils {
       return partsAfterMax.length > 0 ? partsToMax.concat([partsAfterMax.join(separator)]) : partsToMax;
     } else {
       const error = `Seperator [Length was ${separator.length}] must be single character and limit [Limit was ${limit}] greater than 0.`;
-      Log.writeLine(LogLevels.Error, error);
-      throw new Error(error);
+      Log.logErrorAndThrow(error);
     }
   }
 
@@ -142,8 +140,7 @@ export class StringUtils {
       return partsToMax.length > 0 ? [partsToMax.join(separator)].concat(partsAfterMax) : partsAfterMax;
     } else {
       const error = `Seperator [Length was ${separator.length}] must be single character and limit [Limit was ${limit}] greater than 0.`;
-      Log.writeLine(LogLevels.Error, error);
-      throw new Error(error);
+      Log.logErrorAndThrow(error);
     }
   }
 
@@ -190,8 +187,7 @@ export class StringUtils {
       }
     } else {
       const error = `Seperator [Length was ${separator.length}] must be single character.`;
-      Log.writeLine(LogLevels.Error, error);
-      throw new Error(error);
+      Log.logErrorAndThrow(error);
     }
   }
 
@@ -223,8 +219,7 @@ export class StringUtils {
         };
       } else {
         const errText = `Object <${rawCommand}> has no closing brackets! If has opening brackets then must have closing brackets`;
-        Log.writeLine(LogLevels.Error, errText);
-        throw new Error(errText);
+        Log.logErrorAndThrow(errText);
       }
     } else {
       return {
@@ -290,11 +285,11 @@ export class StringUtils {
   static replaceAll(original: string, searchValue: string, replaceValue: string): string {
     if (Utils.isNullOrUndefined(original)) {
       const errText = `Cannot replace [${searchValue}] with [${replaceValue}] Original is null or undefined!`;
-      Log.writeLine(LogLevels.Error,errText);
-      throw new Error(errText);
+      Log.logErrorAndThrow(errText, {stackOffset: 1});
     }
-    const escapedRegExp = new RegExp(JsonUtils.escapeRegExp(searchValue),'g');
-    return original.replace(escapedRegExp, replaceValue);
+    // Native String.prototype.replaceAll (ES2021+, safe given this package's Node >=22 floor)
+    // treats searchValue as a literal, not a pattern — no manual regex/escaping needed.
+    return original.replaceAll(searchValue, replaceValue);
   }
 
   /**

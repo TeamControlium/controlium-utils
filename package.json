@@ -1,6 +1,6 @@
 {
   "name": "@controlium/utils",
-  "version": "1.0.2-alpha.2",
+  "version": "1.0.2",
   "description": "Shared utilities for Controlium-based projects",
   "type": "module",
   "author": "Team Controllium contributors",
@@ -11,6 +11,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TeamControlium/controlium-utils"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
@@ -27,10 +30,12 @@
     "clean": "rm -rf dist coverage",
     "build:esm": "tsc -p tsconfig.build.json",
     "build": "npm run clean && npm run build:esm",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:debug": "vitest run --reporter=verbose mock.spec",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint 'src/**/*.ts' --fix",
+    "lint:check": "eslint 'src/**/*.ts'",
     "release": "semantic-release"
   },
   "keywords": [
@@ -43,8 +48,6 @@
   ],
   "dependencies": {
     "@types/jsonpath-plus": "^5.0.2",
-    "@types/lodash": "^4.14.195",
-    "@types/ps-tree": "^1.1.6",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "entities": "^6.0.1",
@@ -52,25 +55,26 @@
     "jsonpath-plus": "^10.3.0",
     "jsonpointer": "^5.0.1",
     "jsonwebtoken": "^9.0.2",
-    "lodash": "^4.17.12",
-    "ps-tree": "^1.2.0",
+    "picomatch": "^4.0.7",
+    "tree-kill": "^1.2.2",
     "undici": "^8.1.0"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.0",
     "@semantic-release/commit-analyzer": "^13.0.0",
     "@semantic-release/git": "^10.0.0",
-    "@semantic-release/npm": "^12.0.0",
+    "@semantic-release/npm": "^13.2.0",
     "@semantic-release/release-notes-generator": "^14.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.0",
+    "@types/picomatch": "^4.0.3",
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
-    "@vitest/coverage-v8": "^4.1.4",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^8.0.0",
-    "semantic-release": "^24.0.0",
+    "semantic-release": "^25.0.9",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.11"
   },
   "publishConfig": {
     "access": "public"

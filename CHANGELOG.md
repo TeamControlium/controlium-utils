@@ -1,3 +1,25 @@
+## [1.0.2-alpha.5](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.4...v1.0.2-alpha.5) (2026-04-16)
+
+
+### Bug Fixes
+
+* Added headers to HTTPResponse ([d86750d](https://github.com/TeamControlium/controlium-utils/commit/d86750d13323c4f87ba0d2e3d89d0a98281cf372))
+
+## [1.0.2-alpha.4](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.3...v1.0.2-alpha.4) (2026-04-16)
+
+
+### Bug Fixes
+
+* Ensure APIUtils is exposed ([6ae3a37](https://github.com/TeamControlium/controlium-utils/commit/6ae3a379ef060367850bbd7c09fddcfa92fd92db))
+* Ensure APIUtils is exposed ([b8a227d](https://github.com/TeamControlium/controlium-utils/commit/b8a227d799244bde8fa696062bcfe109fd97616c))
+
+## [1.0.2-alpha.3](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.2...v1.0.2-alpha.3) (2026-04-15)
+
+
+### Bug Fixes
+
+* Add APIUtils and drop CJS support ([00ea938](https://github.com/TeamControlium/controlium-utils/commit/00ea938df783af86703a08bf271b35d851117ceb))
+
 ## [1.0.2-alpha.2](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.1...v1.0.2-alpha.2) (2026-04-09)
 
 

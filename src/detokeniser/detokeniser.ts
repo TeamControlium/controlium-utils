@@ -1,7 +1,7 @@
 import { addDays, addHours, addMinutes, addMonths, addYears, format, secondsToHours, secondsToMinutes } from "date-fns";
 import { formatInTimeZone, getTimezoneOffset } from "date-fns-tz";
 
-import { JsonUtils, Log, LogLevels, StringUtils, Utils } from "../index";
+import { JsonUtils, Log, LogLevels, StringUtils, Utils } from "../index.js";
 
 // ─── PublicHolidays stub ─────────────────────────────────────────────────────
 // TODO: Replace with a real import when a PublicHolidays module is provided by the consumer.
@@ -232,6 +232,7 @@ export class Detokeniser {
    * @see {@link Detokeniser.doAsync} for async token resolution
    */
   public static addCallback(callback: Detokeniser.Callback) {
+    Utils.assertType(callback, "function", "Detokeniser.addCallback", "callback");
     if (!this._callbacks) {
       this._callbacks = new Array<Detokeniser.Callback>();
     }
@@ -281,6 +282,7 @@ export class Detokeniser {
   public static do(tokenisedString: string, options: Detokeniser.DoOptions = {}): string {
     let deEscape = true;
     try {
+      Utils.assertType(tokenisedString, "string", "Detokeniser.do", "tokenisedString");
       const runningString = this.doPreamble(tokenisedString);
 
       // Loop until last token find found no tokens
@@ -312,7 +314,7 @@ export class Detokeniser {
       runningString.outputString = this.doDeEscapesIfRequired(tokenisedString, deEscape, runningString.outputString);
       return runningString.outputString;
     } catch (err: unknown) {
-      const errText = `Error processing [${tokenisedString}]: ${typeof err === "string" ? err : err instanceof Error ? err.message : "<unknown>"}`;
+      const errText = `Error processing [${tokenisedString}]: ${Utils.errorMessage(err)}`;
       Log.writeLine(LogLevels.Error, errText);
       throw Error(errText);
     }
@@ -350,6 +352,7 @@ export class Detokeniser {
     let deEscape = true;
 
     try {
+      Utils.assertType(tokenisedString, "string", "Detokeniser.doAsync", "tokenisedString");
       const runningString = this.doPreamble(tokenisedString);
 
       // Loop until last token find found no tokens
@@ -375,7 +378,7 @@ export class Detokeniser {
       runningString.outputString = this.doDeEscapesIfRequired(tokenisedString, deEscape, runningString.outputString);
       return runningString.outputString;
     } catch (err: unknown) {
-      const errText = `Error processing [${tokenisedString}]: ${typeof err === "string" ? err : err instanceof Error ? err.message : "<unknown>"}`;
+      const errText = `Error processing [${tokenisedString}]: ${Utils.errorMessage(err)}`;
       Log.writeLine(LogLevels.Error, errText);
       throw Error(errText);
     }
@@ -546,14 +549,18 @@ export class Detokeniser {
     const bodyJSON = `{${tokenBody}}`;
     if (!JsonUtils.isJson(bodyJSON, true)) {
       const errText = `Token 'Setting'.\nExpected: parameters in name: value format (IE. ${this._startTokenChar}setting;processEnvName: "MY_SETTING"${this._endTokenChar}\nToken was: ${this._startTokenChar}setting;${tokenBody}${this._endTokenChar}\n\nValid Setting parameters include;\n  processEnvName - Name of process env variable\n  npmPackageConfigName - Name of NPM config var\n  profileParameterName - Name of Cucumber profile parameter\n  defaultValue - default value if cannot be found`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
+      Log.logErrorAndThrow(errText);
     }
-    const result = Utils.getSetting(LogLevels.TestInformation, "From Detokeniser", JsonUtils.parse(bodyJSON, true), options.contextParameters);
-    if (Utils.isNullOrUndefined(result)) {
-      return result as undefined;
+    const { value } = Utils.getSetting(
+      LogLevels.TestInformation,
+      "From Detokeniser",
+      JsonUtils.parse(bodyJSON, true),
+      options.contextParameters ? { parameters: options.contextParameters } : undefined
+    );
+    if (Utils.isNullOrUndefined(value)) {
+      return value as undefined;
     } else {
-      return typeof result === 'object' ? JSON.stringify(result) : String(result);
+      return typeof value === 'object' ? JSON.stringify(value) : String(value);
     }
   }
 
@@ -573,12 +580,16 @@ export class Detokeniser {
    * Detokeniser.doBase64('SGVsbG8gV29ybGQ=', 'decode'); // → 'Hello World'
    */
   public static doBase64(original: string, direction: "encode" | "decode"): string {
+    Utils.assertType(original, "string", "Detokeniser.doBase64", "original");
+    if (direction !== "encode" && direction !== "decode") {
+      const errText = `Cannot Detokeniser.doBase64 as [direction] must be 'encode' or 'decode'. Is [${Utils.describeValue(direction)}]`;
+      Log.logErrorAndThrow(errText);
+    }
     try {
       return direction == "encode" ? Buffer.from(original).toString("base64") : Buffer.from(original, "base64").toString();
     } catch (err) {
-      const errText = `Converting:\n[${original}]\n  ${direction == "encode" ? "to" : "from"} base64:\n {${(err as Error).message}}`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
+      const errText = `Converting:\n[${original}]\n  ${direction == "encode" ? "to" : "from"} base64:\n {${Utils.errorMessage(err)}}`;
+      Log.logErrorAndThrow(errText);
     }
   }
 
@@ -605,8 +616,7 @@ export class Detokeniser {
     //
     if (!MockUtils.interceptedRequests || MockUtils.interceptedRequests.length <= 0) {
       const errMessage = "No Mock Intercepted requests to harvest from!?";
-      Log.writeLine(LogLevels.Error, errMessage);
-      throw new Error(errMessage);
+      Log.logErrorAndThrow(errMessage);
     }
 
     const jsonProperties = JsonUtils.getPropertiesMatchingPath(MockUtils.interceptedRequests, jsonPath);
@@ -922,8 +932,7 @@ export class Detokeniser {
     // So, to do this we get all public holidays upto maxDaysAway; first holiday is day we want!  easy!!!
     if (state == undefined) {
       const errMsg = "Cannot get next public holiday, State not defined (Use {Date(<state>);......})";
-      Log.writeLine(LogLevels.Error, errMsg);
-      throw new Error(errMsg);
+      Log.logErrorAndThrow(errMsg);
     }
     const startDate = new Date(dateEpoch).getTime();
     const endDate = addDays(startDate, maxDaysAway).getTime();
@@ -988,8 +997,7 @@ export class Detokeniser {
   private static getOffset(state: string, dateOfOffset: Date | number): string {
     if (state == undefined) {
       const errMsg = "Unable to get timezone offset as no state provided.  Expect {Date(<state>);TimezoneOffset}";
-      Log.writeLine(LogLevels.Error, errMsg);
-      throw new Error(errMsg);
+      Log.logErrorAndThrow(errMsg);
     }
 
     const offsetMilliseconds = getTimezoneOffset(PublicHolidays.getIANAZone(state), dateOfOffset);
