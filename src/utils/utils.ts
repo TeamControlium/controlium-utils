@@ -757,31 +757,60 @@ export class Utils {
     }
 
     /**
+     * Restores a single process environment variable previously modified by {@link setProcessEnv}
+     * back to its original value. Deletes it if it did not previously exist. A no-op (with a
+     * debug log) if the variable was never modified via {@link setProcessEnv}.
+     *
+     * @param varName - Name of the environment variable to restore.
+     * @see {@link setProcessEnv}
+     * @throws {Error} If an error occurs while resetting the variable.
+     */
+    public static resetProcessEnv(varName: string): void {
+        Utils.assertType(varName, "string", "Utils.resetProcessEnv", "varName");
+
+        try {
+            const originalValueKeyName = ENV_VAR_ORIGINAL_PREAMBLE + varName;
+            if (!(originalValueKeyName in process.env)) {
+                Log.writeLine(
+                    LogLevels.FrameworkDebug,
+                    `No saved original value for env var [${varName}] (never set via setProcessEnv) — nothing to reset`
+                );
+                return;
+            }
+            const originalValue = process.env[originalValueKeyName];
+            if (originalValue === "_undefined") {
+                Log.writeLine(
+                    LogLevels.FrameworkDebug,
+                    `Found [${originalValueKeyName}] (Value: ${originalValue}) so deleting [${varName}] and [${originalValueKeyName}]`
+                );
+                delete process.env[varName];
+            } else {
+                Log.writeLine(
+                    LogLevels.FrameworkDebug,
+                    `Found [${originalValueKeyName}] (Value: ${originalValue}) so restoring [${varName}] to [${originalValue}] and deleting [${originalValueKeyName}]`
+                );
+                process.env[varName] = originalValue as string;
+            }
+            delete process.env[originalValueKeyName];
+        } catch (err) {
+            const errMess = `Error resetting environment variable [${varName}]: ${Utils.errorMessage(err)}`;
+            Log.logErrorAndThrow(errMess);
+        }
+    }
+
+    /**
      * Restores all process environment variables that were modified by {@link setProcessEnv}
      * back to their original values. Variables that did not previously exist are deleted.
      *
      * @see {@link setProcessEnv}
+     * @see {@link resetProcessEnv}
      * @throws {Error} If an error occurs while resetting variables.
      */
-    public static resetProcessEnvs() {
-        try {
-            Object.entries(process.env).forEach(([key, value]) => {
-                if (key.startsWith(ENV_VAR_ORIGINAL_PREAMBLE)) {
-                    const varToSet = key.substring(ENV_VAR_ORIGINAL_PREAMBLE.length);
-                    if (value === "_undefined") {
-                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so deleting [${varToSet}] and [${key}]`);
-                        delete process.env[varToSet];
-                    } else {
-                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so restoring [${varToSet}] to [${value}] and deleting [${key}]`);
-                        process.env[varToSet] = value;
-                        delete process.env[key];
-                    }
-                }
-            });
-        } catch (err) {
-            const errMess = `Error resetting environment variables: ${Utils.errorMessage(err)}`;
-            Log.logErrorAndThrow(errMess);
-        }
+    public static resetProcessEnvs(): void {
+        Object.keys(process.env)
+            .filter((key) => key.startsWith(ENV_VAR_ORIGINAL_PREAMBLE))
+            .map((key) => key.substring(ENV_VAR_ORIGINAL_PREAMBLE.length))
+            .forEach((varName) => Utils.resetProcessEnv(varName));
     }
 
     // ── Object / JSON ─────────────────────────────────────────────────────────
