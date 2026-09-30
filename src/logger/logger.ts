@@ -5,7 +5,7 @@ import {
   WriteLineOptions,
   Options,
   LogOutputCallbackSignature
-} from "./types";
+} from "./types.js";
 
 // ----------------------------
 // Module-level defaults
@@ -307,6 +307,9 @@ export class Logger {
     minLevel: number,
     maxLevel: number
   ): string {
+    this.assertParamType(level, "number", "Logger.loggingLevelDescription", "level");
+    this.assertParamType(minLevel, "number", "Logger.loggingLevelDescription", "minLevel");
+    this.assertParamType(maxLevel, "number", "Logger.loggingLevelDescription", "maxLevel");
     const currentLevelText = this.levelToText(level);
     const preamble = this.options.panicMode
       ? this.options.panicDescriptorPreamble
@@ -479,6 +482,11 @@ export class Logger {
     logLevel: number,
     screenshot: Buffer | string
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attachScreenshot", "logLevel");
+    if (!Buffer.isBuffer(screenshot) && typeof screenshot !== "string") {
+      const errorText = `Cannot Logger.attachScreenshot as [screenshot] must be a Buffer or string. Is [${typeof screenshot}]`;
+      Logger.logErrorAndThrow(errorText);
+    }
     if (this.logLevelOk(logLevel)) {
       if (typeof screenshot === "string") {
         screenshot = Buffer.from(screenshot).toString("base64");
@@ -504,6 +512,8 @@ export class Logger {
    * Logger.attachHTML(Logger.Levels.TestInformation, "<b>Test passed</b>");
    */
   public static attachHTML(logLevel: number, htmlString: string): void {
+    this.assertParamType(logLevel, "number", "Logger.attachHTML", "logLevel");
+    this.assertParamType(htmlString, "string", "Logger.attachHTML", "htmlString");
     this.attach(logLevel, htmlString, "text/html");
   }
 
@@ -528,12 +538,14 @@ export class Logger {
     videoFilePath: string,
     options: VideoOptions = this.videoOptions
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attachVideoFile", "logLevel");
+    this.assertParamType(videoFilePath, "string", "Logger.attachVideoFile", "videoFilePath");
     if (this.logLevelOk(logLevel)) {
       let videoBuffer: Buffer;
       try {
         videoBuffer = readFileSync(videoFilePath);
       } catch (err) {
-        const errText = `Error thrown reading video data from given file path:-\n${(err as Error).message}`;
+        const errText = `Error thrown reading video data from given file path:-\n${this.errorMessage(err)}`;
         this.processError(errText);
         return;
       }
@@ -563,6 +575,11 @@ export class Logger {
     video: Buffer,
     options?: VideoOptions
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attachVideo", "logLevel");
+    if (!Buffer.isBuffer(video)) {
+      const errorText = `Cannot Logger.attachVideo as [video] must be a Buffer. Is [${typeof video}]`;
+      Logger.logErrorAndThrow(errorText);
+    }
     const actualOptions =
       options == null
         ? this.options.video
@@ -605,12 +622,17 @@ export class Logger {
     dataString: string,
     mediaType: string
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.attach", "logLevel");
+    // Note: dataString is deliberately not type-checked here — attach() tolerates
+    // non-string payloads (see truncateForDisplay), so callback errors can still
+    // describe what was actually passed instead of crashing before reaching it.
+    this.assertParamType(mediaType, "string", "Logger.attach", "mediaType");
     if (this.logLevelOk(logLevel)) {
       if (typeof this.logOutputCallback === "function") {
         try {
           this.logOutputCallback(dataString, mediaType);
         } catch (err) {
-          const errText = `Error thrown from Log Output Callback:-\n${(err as Error).message}\nwhen called with data string:-\n${this.truncateForDisplay(dataString)}\nand mediaType:-\n${this.truncateForDisplay(mediaType)}`;
+          const errText = `Error thrown from Log Output Callback:-\n${this.errorMessage(err)}\nwhen called with data string:-\n${this.truncateForDisplay(dataString)}\nand mediaType:-\n${this.truncateForDisplay(mediaType)}`;
           this.processError(errText);
         }
       } else {
@@ -653,6 +675,8 @@ export class Logger {
     textString: string,
     options?: WriteLineOptions
   ): void {
+    this.assertParamType(logLevel, "number", "Logger.writeLine", "logLevel");
+    this.assertParamType(textString, "string", "Logger.writeLine", "textString");
     const stackObj: unknown = {};
     Error.captureStackTrace(stackObj as object, this.writeLine);
     const stack = (stackObj as Error)?.stack ?? "[Unknown]";
@@ -684,8 +708,7 @@ export class Logger {
 
       if (normalizedMaxLines < 3) {
         const errorMessage = `maxLines must be 3 or greater!  Number given was <${maxLines}>`
-        Logger.writeLine(this.Levels.Error, errorMessage);
-        throw new Error(errorMessage);
+        Logger.logErrorAndThrow(errorMessage);
       }
 
       textArray.forEach((line: string, index: number) => {
@@ -714,6 +737,35 @@ export class Logger {
         isFirstLine = false;
       });
     }
+  }
+
+  /**
+   * Builds an `Error` from `message`, logs it at {@link Levels.Error}, and throws it —
+   * collapsing the "build message, log it, throw it" pattern used throughout this package
+   * into one call. Typed `never` so TypeScript still treats code after the call as
+   * unreachable, exactly as it would after a bare `throw` — this holds even for a bare
+   * statement call, no `throw` keyword needed at the call site, as long as the call is the
+   * last thing in that code path.
+   *
+   * Always adds one to `options.stackOffset` before passing it to {@link writeLine} — like
+   * {@link assertParamType}, this is itself a generic, many-caller helper, so its own
+   * location is never useful in the log; the caller's location is. Pass `stackOffset` in
+   * `options` if the *caller* is itself a generic helper needing to skip an additional frame.
+   *
+   * @param message - The error message. Logged as-is, then used to construct the thrown `Error`.
+   * @param options - Same {@link WriteLineOptions} as {@link writeLine}.
+   * @throws {Error} Always — this function never returns.
+   *
+   * @example
+   * if (bad) Logger.logErrorAndThrow(`Cannot frobnicate as [x] is bad`);
+   * // equivalent to, but replaces:
+   * //   const errText = `Cannot frobnicate as [x] is bad`;
+   * //   Logger.writeLine(Logger.Levels.Error, errText);
+   * //   throw new Error(errText);
+   */
+  public static logErrorAndThrow(message: string, options?: WriteLineOptions): never {
+    Logger.writeLine(this.Levels.Error, message, { ...options, stackOffset: (options?.stackOffset ?? 0) + 1 });
+    throw new Error(message);
   }
 
   // ----------------------------
@@ -877,7 +929,7 @@ export class Logger {
           this.logOutputCallback!(textToWrite);
           doneCallbackWrite = true;
         } catch (err) {
-          const errText = `Error thrown from Log Output Callback during writeLine:-\n${(err as Error).message}`;
+          const errText = `Error thrown from Log Output Callback during writeLine:-\n${this.errorMessage(err)}`;
           // Avoid infinite recursion: log directly to console rather than calling processError -> writeLine
           console.error(errText);
           if (this.options.throwErrorIfLogOutputFails) {
@@ -923,14 +975,6 @@ export class Logger {
    * Left-pads a number (or numeric string) with zeroes to reach the required minimum length.
    * Kept private and self-contained so `logger.ts` has no external utility dependencies.
    */
-  private static pad(num: number, requiredMinimumLength: number): string {
-    let numString = num.toString();
-    while (numString.length < requiredMinimumLength) {
-      numString = "0" + numString;
-    }
-    return numString;
-  }
-
   private static getWriteTypeString(levelOfWrite: number): string {
     switch (levelOfWrite) {
       case this.Levels.Error:
@@ -946,7 +990,7 @@ export class Logger {
       case this.Levels.TestInformation:
         return "TSINF";
       default:
-        return this.pad(levelOfWrite, WRITE_TYPE_PAD_WIDTH);
+        return String(levelOfWrite).padStart(WRITE_TYPE_PAD_WIDTH, "0");
     }
   }
 
@@ -1012,6 +1056,41 @@ export class Logger {
       passedInLogLevel >= this.options.filterMinCurrentLevel &&
       passedInLogLevel <= this.options.filterMaxCurrentLevel;
     return withinCurrentLevel || withinFilterRange;
+  }
+
+  /**
+   * Local equivalent of `Utils.assertType`, duplicated for the same reason as
+   * {@link errorMessage} below — `Logger` sits below `Utils` in the module dependency
+   * graph and must not import it back. Throws a logged error if `value` isn't of
+   * `expectedType`; the caller cannot be trusted to have actually passed what its
+   * TypeScript signature promises.
+   */
+  private static assertParamType(value: unknown, expectedType: "string" | "number", funcName: string, paramName: string): void {
+    if (typeof value !== expectedType) {
+      const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
+      // stackOffset: 1 — generic helper reused from writeLine/attach*/loggingLevelDescription;
+      // report the caller, not this. (When called from writeLine validating its own params,
+      // this still lands one frame short of the true external caller — an accepted limitation,
+      // consistent with how Utils.assertType/JsonUtils.assertObject apply the same +1 convention.)
+      Logger.logErrorAndThrow(errorText, { stackOffset: 1 });
+    }
+  }
+
+  /**
+   * Safely extracts a human-readable message from a caught value of unknown shape, without
+   * throwing itself (a bare `(err as Error).message` cast throws a new, unrelated `TypeError`
+   * when `err` isn't actually an `Error`, masking the original failure). Duplicated from
+   * `Utils.errorMessage` rather than imported — `Logger` sits below `Utils` in the module
+   * dependency graph and must not import it back.
+   */
+  private static errorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (typeof err === "string") return err;
+    try {
+      return JSON.stringify(err) ?? String(err);
+    } catch {
+      return String(err);
+    }
   }
 
   private static processError(errorText: string): void {

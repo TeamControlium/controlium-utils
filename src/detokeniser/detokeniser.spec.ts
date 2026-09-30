@@ -1,6 +1,6 @@
 import { addDays, addMonths, addYears, format } from "date-fns";
 
-import { Detokeniser } from "./detokeniser";
+import { Detokeniser } from "./detokeniser.js";
 
 describe("Detokeniser", () => {
   afterEach(() => {

@@ -1,3 +1,10 @@
+## [1.0.2-alpha.5](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.4...v1.0.2-alpha.5) (2026-04-16)
+
+
+### Bug Fixes
+
+* Added headers to HTTPResponse ([d86750d](https://github.com/TeamControlium/controlium-utils/commit/d86750d13323c4f87ba0d2e3d89d0a98281cf372))
+
 ## [1.0.2-alpha.4](https://github.com/TeamControlium/controlium-utils/compare/v1.0.2-alpha.3...v1.0.2-alpha.4) (2026-04-16)
 
 

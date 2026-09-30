@@ -5,12 +5,13 @@ import path from "path";
 import { decodeHTML } from "entities";
 import { createRequire } from 'module';
 const { sign: jwtSign, decode: jwtDecode } = createRequire(import.meta.url)('jsonwebtoken') as typeof import('jsonwebtoken');
-import psTree from "ps-tree";
+import treeKill from "tree-kill";
+import picomatch from "picomatch";
 
 // import { Detokeniser } from "./Detokeniser"; Claude, just masking this out for now...
-import { JsonUtils } from "../index";
-import { Log, LogLevel, LogLevels } from "../index";
-import { StringUtils } from "../index";
+import { JsonUtils } from "../index.js";
+import { Log, LogLevel, LogLevels } from "../index.js";
+import { StringUtils } from "../index.js";
 
 // ─── Module-level constants ───────────────────────────────────────────────────
 
@@ -56,6 +57,56 @@ export interface AssertTypeMap {
     bigint: bigint;
     symbol: symbol;
     function: (...args: unknown[]) => unknown;
+}
+
+/**
+ * Maps named shape/range constraints to their corresponding TypeScript types.
+ * Used by {@link Utils.assertShape} to provide type narrowing after assertion.
+ *
+ * Deliberately a separate map from {@link AssertTypeMap} rather than folded into it —
+ * `assertType`'s key selects a raw `typeof` result; these keys select a *constraint*
+ * layered on top of a type (non-emptiness, range, non-null-ness). Mixing the two concerns
+ * into one map would make `assertType`'s single parameter do two jobs at once.
+ */
+export interface AssertShapeMap {
+    /** Non-null, non-array object — safe to spread or read named properties off. */
+    nonNullObject: object;
+    /** Non-empty string (`length > 0`). */
+    nonEmptyString: string;
+    /** Finite number greater than zero. */
+    positiveNumber: number;
+    /** Integer in the valid TCP port range (1–65535). */
+    port: number;
+}
+
+/**
+ * Result of {@link Utils.getSetting} — the resolved value alongside a human-readable
+ * description of where it came from (e.g. `"Env var 'API_URL'"`, `"World 'eaTest.apiUrl'"`,
+ * `"Default value"`, `"Not found"`).
+ */
+export interface SettingResult<T> {
+    value: T | undefined;
+    source: string;
+}
+
+/**
+ * Context {@link Utils.getSetting} resolves a `profileParameterName` JSONPath against.
+ * `parameters` is the actual object to query (e.g. a Cucumber World); `sourceName` is a
+ * cosmetic label for what `parameters` *is*, shown in the returned `source` description
+ * in place of the generic default `"Profile"` — it has no effect on resolution itself.
+ */
+export interface SettingsContext {
+    sourceName?: string;
+    /**
+     * The actual object to query with `profileParameterName` — e.g. a Cucumber World
+     * instance. Deliberately typed `object`, not `Record<string, unknown>` — a real class
+     * instance (any class, not just a World) doesn't satisfy an index-signature type like
+     * `Record<string, unknown>` even though every property on it is individually compatible
+     * with `unknown`; TypeScript requires the source to have its own index signature, which
+     * ordinary classes don't. `object` matches what {@link JsonUtils.getPropertiesMatchingPath}/
+     * {@link JsonUtils.getMatchingJSONPropertyCount} already accept underneath this.
+     */
+    parameters: object;
 }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
@@ -116,10 +167,163 @@ export class Utils {
      */
     public static assertType<K extends keyof AssertTypeMap>(value: unknown, expectedType: K, funcName: string, paramName: string): asserts value is AssertTypeMap[K] {
         if (typeof value !== expectedType) {
-            const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${typeof value}]`;
-            Log.writeLine(LogLevels.Error, errorText);
-            throw new Error(errorText);
+            const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${Utils.describeValue(value)}]`;
+            // stackOffset: 1 — assertType is a generic helper called from dozens of sites;
+            // its own location is never useful, only the caller whose check actually failed.
+            Log.logErrorAndThrow(errorText, { stackOffset: 1 });
         }
+    }
+
+    /**
+     * Asserts that a value matches a named shape/range constraint, throwing a logged error if
+     * not. After a successful call, TypeScript narrows `value` to the corresponding type.
+     * Sibling to {@link assertType} for checks that need more than a raw `typeof` match —
+     * see {@link AssertShapeMap} for why this is a separate function rather than folded into
+     * `assertType`'s map.
+     *
+     * @param value - Value to check.
+     * @param expectedShape - Named constraint to check against (e.g. `"nonEmptyString"`, `"port"`).
+     * @param funcName - Name of the calling function, used in the error message.
+     * @param paramName - Name of the parameter being checked, used in the error message.
+     * @throws {Error} If `value` does not satisfy `expectedShape`.
+     *
+     * @example
+     * Utils.assertShape(port, "port", "connect", "port");
+     * // port is now narrowed to number, and guaranteed 1-65535
+     */
+    public static assertShape<K extends keyof AssertShapeMap>(value: unknown, expectedShape: K, funcName: string, paramName: string): asserts value is AssertShapeMap[K] {
+        if (!Utils.matchesShape(value, expectedShape)) {
+            const errorText = `Cannot ${funcName} as [${paramName}] not a valid '${expectedShape}'. Is [${Utils.describeValue(value)}]`;
+            // stackOffset: 1 — same generic-helper reasoning as assertType (see there).
+            Log.logErrorAndThrow(errorText, { stackOffset: 1 });
+        }
+    }
+
+    private static matchesShape(value: unknown, expectedShape: keyof AssertShapeMap): boolean {
+        switch (expectedShape) {
+            case 'nonNullObject':
+                return value !== null && typeof value === 'object' && !Array.isArray(value);
+            case 'nonEmptyString':
+                return typeof value === 'string' && value.length > 0;
+            case 'positiveNumber':
+                return typeof value === 'number' && Number.isFinite(value) && value > 0;
+            case 'port':
+                return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535;
+            default:
+                // Compile-time exhaustiveness check: if AssertShapeMap gains a key without a
+                // matching case above, this line fails to compile. Also the runtime fallback
+                // for a JS caller passing an expectedShape value TypeScript didn't catch —
+                // fail closed (treat as non-matching) rather than silently passing.
+                expectedShape satisfies never;
+                return false;
+        }
+    }
+
+    /**
+     * Safely describes an arbitrary value for inclusion in an error message. Never throws itself,
+     * even for `null`, `undefined`, or hostile objects. Deliberately never includes the value's
+     * own content — only its type/shape — for two reasons: content length is unbounded (a
+     * `string` parameter could be megabytes), and content may be sensitive and must not be
+     * leaked into logs. This applies uniformly across every type, not just objects.
+     *
+     * @param value - Value to describe.
+     * @returns A human-readable description of the value's type/shape, e.g. `"string (length 5)"`,
+     * `"object (Array)"`, or `"function (myHandler)"`. Never includes the value's own content.
+     *
+     * @example
+     * Utils.describeValue(42); // "number"
+     * Utils.describeValue(null); // "null"
+     * Utils.describeValue({ a: 1 }); // "object (Object)"
+     * Utils.describeValue("hello"); // "string (length 5)"
+     */
+    static describeValue(value: unknown): string {
+        if (value === null) return 'null';
+        if (value === undefined) return 'undefined';
+        const type = typeof value;
+        if (type === 'function') {
+            try {
+                const name = (value as { name?: string }).name;
+                return `function (${name || 'anonymous'})`;
+            } catch {
+                return 'function';
+            }
+        }
+        if (type === 'object') {
+            try {
+                const ctorName = (value as object).constructor?.name;
+                return `object (${ctorName || 'Object'})`;
+            } catch {
+                return 'object';
+            }
+        }
+        if (type === 'string') {
+            try {
+                return `string (length ${(value as string).length})`;
+            } catch {
+                return 'string';
+            }
+        }
+        return type;
+    }
+
+    /**
+     * Safely extracts a human-readable message from a caught value of unknown shape. Never
+     * throws itself — in particular, a bare `(err as Error).message` cast throws a new,
+     * unrelated `TypeError` when `err` is `null`/`undefined`/a non-Error throw, masking
+     * whatever actually failed. Use this instead of that cast in every `catch` block.
+     *
+     * @param err - The caught value (from a `catch` clause, `Promise` rejection, etc.).
+     * @returns `err.message` if `err` is an `Error`; `err` itself if it's a string;
+     * otherwise a best-effort `JSON.stringify`/`String` rendering.
+     *
+     * @example
+     * try { ... } catch (err) {
+     *   Log.writeLine(LogLevels.Error, `Failed: ${Utils.errorMessage(err)}`);
+     * }
+     */
+    static errorMessage(err: unknown): string {
+        if (err instanceof Error) return err.message;
+        if (typeof err === 'string') return err;
+        try {
+            return JSON.stringify(err) ?? String(err);
+        } catch {
+            return String(err);
+        }
+    }
+
+    /**
+     * Safely serializes a value to a bounded-length string for inclusion in a log/error
+     * message. Never throws — a circular reference, a `BigInt`, or any other
+     * `JSON.stringify` failure falls back to {@link describeValue} instead of crashing the
+     * caller. Output longer than `maxLength` is truncated with a marker showing the true
+     * length, so a large payload (an oversized response body, a header object with a huge
+     * value, ...) can never dump unbounded content into a log — the same size-bounding
+     * principle {@link describeValue} applies, extended to values that need to be shown
+     * (not just described) but still can't be trusted to be small.
+     *
+     * @param value - Value to serialize.
+     * @param options - Optional settings:
+     *   - `maxLength` — Maximum length of the returned string before truncation (default: `1000`).
+     *     Falls back to the default if not a positive finite number.
+     * @returns A bounded-length JSON string, or a safe fallback description if serialization fails.
+     *
+     * @example
+     * Utils.safeStringify({ a: 1 }); // '{"a":1}'
+     * Utils.safeStringify(circularObj); // '<unable to stringify: ...> (object (Object))'
+     * Utils.safeStringify(hugeArray, { maxLength: 200 }); // '[...]... (truncated, 48213 total chars)'
+     */
+    static safeStringify(value: unknown, options?: { maxLength?: number }): string {
+        const maxLength =
+            typeof options?.maxLength === 'number' && Number.isFinite(options.maxLength) && options.maxLength > 0
+                ? options.maxLength
+                : 1000;
+        let result: string;
+        try {
+            result = JSON.stringify(value) ?? String(value);
+        } catch (err) {
+            return `<unable to stringify: ${Utils.errorMessage(err)}> (${Utils.describeValue(value)})`;
+        }
+        return result.length > maxLength ? `${result.slice(0, maxLength)}... (truncated, ${result.length} total chars)` : result;
     }
 
     /**
@@ -217,9 +421,8 @@ export class Utils {
      * Utils.pad("42", 5); // => "00042"
      */
     static pad(num: number | string, requiredMinimumLength: number): string {
-        let numString = typeof num === "number" ? num.toString() : num;
-        while (numString.length < requiredMinimumLength) numString = "0" + numString;
-        return numString;
+        const numString = typeof num === "number" ? num.toString() : num;
+        return numString.padStart(requiredMinimumLength, "0");
     }
 
     /**
@@ -329,13 +532,12 @@ export class Utils {
                     }
                     case ExistingFileWriteActions.ThrowError: {
                         const errText = `File [${fullFilename}] exists and action is ThrowError!`;
-                        Log.writeLine(LogLevels.Error, errText);
-                        throw new Error(errText);
+                        Log.logErrorAndThrow(errText);
+                        break;
                     }
                     default: {
                         const errText = `Cannot write to file [${fullFilename}] — unknown action [${ifExistsAction}]!`;
-                        Log.writeLine(LogLevels.Error, errText);
-                        throw new Error(errText);
+                        Log.logErrorAndThrow(errText);
                     }
                 }
             } else {
@@ -383,7 +585,7 @@ export class Utils {
         const encoding = options?.encoding ?? "utf-8";
         try {
             Log.writeLine(LogLevels.FrameworkInformation, `Load file [${filePath}] using encoding [${encoding}]`);
-            let contents = this.getFileContentsBuffer(filePath).toString(encoding);
+            const contents = this.getFileContentsBuffer(filePath).toString(encoding);
             Log.writeLine(LogLevels.FrameworkDebug, `Loaded [${contents.length}] characters`);
             if (detokenise) {
                 // contents = Detokeniser.do(contents); Hey Claude, dont forget.  Masked out for now...
@@ -393,8 +595,7 @@ export class Utils {
             return contents;
         } catch (err) {
             const errText = `Utils.getFileContents - Reading file using ${encoding} (${detokenise ? "" : "not "}detokenised) threw error: [${err}]`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -411,8 +612,7 @@ export class Utils {
             return readFileSync(filePath);
         } catch (err) {
             const errText = `Utils.getFileContentsBuffer - readFileSync for path [${filePath}] threw error: [${err}]`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -422,19 +622,39 @@ export class Utils {
      * Resolves a setting value from, in priority order:
      * 1. A process environment variable
      * 2. An npm package config variable
-     * 3. A named property within `contextParameters`
+     * 3. A named property within `contextParameters.parameters`
      * 4. A supplied default value
+     *
+     * Returns both the value *and* a human-readable description of where it came from —
+     * useful for a test's own diagnostic/failure output ("apiUrl came from Env var
+     * 'API_URL'", say), not just the value in isolation.
      *
      * @param logLevel - Log level used when reporting where the setting was found.
      * @param settingName - Human-readable name for the setting, used in log messages.
      * @param sources - Named sources to check:
      *   - `processEnvName` — Environment variable name.
      *   - `npmPackageConfigName` — npm package config key.
-     *   - `profileParameterName` — JSONPath into `contextParameters`.
+     *   - `profileParameterName` — JSONPath into `contextParameters.parameters`.
      *   - `defaultValue` — Fallback if no other source resolves.
-     * @param contextParameters - Optional context parameters used to resolve `profileParameterName`.
-     * @returns The resolved setting value, or `undefined` if no source resolved.
+     * @param contextParameters - Optional context used to resolve `profileParameterName`:
+     *   - `parameters` — The actual object to query with `profileParameterName`.
+     *   - `sourceName` — Label identifying what `parameters` *is* (e.g. `"World"` for a
+     *     Cucumber World object), used in the returned `source` description in place of the
+     *     generic default `"Profile"`. Purely cosmetic — doesn't affect resolution.
+     * @returns `{ value, source }` — `value` is the resolved setting (or `undefined` if no
+     *   source resolved); `source` always describes where it came from, even when `value`
+     *   is `undefined` (`"Not found"`) or came from `defaultValue` (`"Default value"`).
      * @throws {Error} If `profileParameterName` is given but `contextParameters` is null.
+     *
+     * @example
+     * Utils.getSetting(LogLevels.TestInformation, "apiUrl", { processEnvName: "API_URL" });
+     * // => { value: "http://...", source: "Env var 'API_URL'" }
+     *
+     * Utils.getSetting(LogLevels.TestInformation, "apiUrl",
+     *   { profileParameterName: "$.eaTest.apiUrl" },
+     *   { sourceName: "World", parameters: world }
+     * );
+     * // => { value: "http://...", source: "World 'eaTest.apiUrl'" }
      */
     public static getSetting<returnType>(
         logLevel: LogLevel,
@@ -445,49 +665,65 @@ export class Utils {
             profileParameterName?: string | undefined;
             defaultValue?: returnType | undefined;
         },
-        contextParameters?: Record<string, unknown>
-    ): returnType | undefined {
+        contextParameters?: SettingsContext,
+    ): SettingResult<returnType> {
+        Utils.assertType(logLevel, "number", "Utils.getSetting", "logLevel");
+        Utils.assertShape(settingName, "nonEmptyString", "Utils.getSetting", "settingName");
+        Utils.assertShape(sources, "nonNullObject", "Utils.getSetting", "sources");
         const debugString = `Got setting [${settingName}] from `;
 
         // Highest priority — process environment variable
         let returnValue: unknown = sources.processEnvName ? process.env[sources.processEnvName] : undefined;
         if (!Utils.isUndefined(returnValue)) {
             Log.writeLine(logLevel, debugString + `env var [${sources.processEnvName}]. Value: <${returnValue as returnType}>`);
-            return returnValue as returnType;
+            return { value: returnValue as returnType, source: `Env var '${sources.processEnvName}'` };
         }
 
         // Next priority — npm package config variable
         returnValue = sources.npmPackageConfigName ? process.env["npm_package_config_" + sources.npmPackageConfigName] : undefined;
         if (!Utils.isUndefined(returnValue)) {
             Log.writeLine(logLevel, debugString + `npm package config var [${sources.npmPackageConfigName}]. Value: <${returnValue as returnType}>`);
-            return returnValue as returnType;
+            return { value: returnValue as returnType, source: `npm package config '${sources.npmPackageConfigName}'` };
         }
 
-        // If no profile parameter name given, or it doesn't match exactly one property, fall back to default
-        if (
-            Utils.isUndefined(sources.profileParameterName) ||
-            (contextParameters && JsonUtils.getMatchingJSONPropertyCount(contextParameters as object, sources.profileParameterName as string)) !== 1
-        ) {
+        const parameters = contextParameters?.parameters;
+        const sourceLabel = contextParameters?.sourceName ?? "Profile";
+
+        // How many properties does the profile path match? Only meaningful if both a path
+        // and a context object were actually given.
+        const matchCount = (!Utils.isUndefined(sources.profileParameterName) && parameters)
+            ? JsonUtils.getMatchingJSONPropertyCount(parameters, sources.profileParameterName)
+            : undefined;
+
+        // If no profile parameter name given, or it doesn't match exactly one property, fall back to
+        // default. "Matched nothing" and "matched more than one" are different problems — an ambiguous
+        // path usually means the path itself is wrong, not that the setting is simply unconfigured —
+        // so ambiguity gets its own distinct log message, even though both still fall back to the
+        // same default/undefined result (the caller can't act differently either way, but a reader
+        // debugging why a setting came back as the default needs to know which case it was).
+        if (Utils.isUndefined(sources.profileParameterName) || matchCount !== 1) {
+            if (typeof matchCount === "number" && matchCount > 1) {
+                Log.writeLine(LogLevels.Warning, `Profile parameter [${sources.profileParameterName}] for setting [${settingName}] is ambiguous — matched ${matchCount} properties, expected exactly 1. Treating as not found.`);
+            }
             returnValue = sources.defaultValue;
             if (Utils.isUndefined(returnValue)) {
                 Log.writeLine(LogLevels.Error, `Unable to determine value for setting [${settingName}]. Returning: <undefined>!`);
-                return undefined;
+                return { value: undefined, source: "Not found" };
             } else {
                 Log.writeLine(logLevel, debugString + `default value: <${returnValue as returnType}>`);
-                return returnValue as returnType;
+                return { value: returnValue as returnType, source: "Default value" };
             }
         }
 
         // Profile parameter name given AND exactly one match exists — use it
-        if (Utils.isNullOrUndefined(contextParameters)) {
-            const errorTxt = `Caller defined Profile parameter [${sources.profileParameterName}] but contextParameters is null!`;
-            Log.writeLine(LogLevels.Error, errorTxt);
-            throw new Error("Settings: " + errorTxt);
-        } else {
-            returnValue = JsonUtils.getPropertiesMatchingPath(contextParameters as object, sources.profileParameterName as string)[0].value as returnType;
-            Log.writeLine(logLevel, debugString + `profile property [${sources.profileParameterName}] value: <${returnValue as returnType}>`);
+        if (Utils.isNullOrUndefined(parameters)) {
+            Log.logErrorAndThrow(`Settings: Caller defined Profile parameter [${sources.profileParameterName}] but contextParameters is null!`);
         }
-        return returnValue as returnType;
+        returnValue = JsonUtils.getPropertiesMatchingPath(parameters, sources.profileParameterName as string)[0].value as returnType;
+        // Strip the JSONPath root ("$." or "$") for a human-readable path — "$.eaTest.apiUrl" -> "eaTest.apiUrl".
+        const humanReadablePath = (sources.profileParameterName as string).replace(/^\$\.?/, "");
+        Log.writeLine(logLevel, debugString + `profile property [${sources.profileParameterName}] value: <${returnValue as returnType}>`);
+        return { value: returnValue as returnType, source: `${sourceLabel} '${humanReadablePath}'` };
     }
 
     /**
@@ -521,32 +757,60 @@ export class Utils {
     }
 
     /**
+     * Restores a single process environment variable previously modified by {@link setProcessEnv}
+     * back to its original value. Deletes it if it did not previously exist. A no-op (with a
+     * debug log) if the variable was never modified via {@link setProcessEnv}.
+     *
+     * @param varName - Name of the environment variable to restore.
+     * @see {@link setProcessEnv}
+     * @throws {Error} If an error occurs while resetting the variable.
+     */
+    public static resetProcessEnv(varName: string): void {
+        Utils.assertType(varName, "string", "Utils.resetProcessEnv", "varName");
+
+        try {
+            const originalValueKeyName = ENV_VAR_ORIGINAL_PREAMBLE + varName;
+            if (!(originalValueKeyName in process.env)) {
+                Log.writeLine(
+                    LogLevels.FrameworkDebug,
+                    `No saved original value for env var [${varName}] (never set via setProcessEnv) — nothing to reset`
+                );
+                return;
+            }
+            const originalValue = process.env[originalValueKeyName];
+            if (originalValue === "_undefined") {
+                Log.writeLine(
+                    LogLevels.FrameworkDebug,
+                    `Found [${originalValueKeyName}] (Value: ${originalValue}) so deleting [${varName}] and [${originalValueKeyName}]`
+                );
+                delete process.env[varName];
+            } else {
+                Log.writeLine(
+                    LogLevels.FrameworkDebug,
+                    `Found [${originalValueKeyName}] (Value: ${originalValue}) so restoring [${varName}] to [${originalValue}] and deleting [${originalValueKeyName}]`
+                );
+                process.env[varName] = originalValue as string;
+            }
+            delete process.env[originalValueKeyName];
+        } catch (err) {
+            const errMess = `Error resetting environment variable [${varName}]: ${Utils.errorMessage(err)}`;
+            Log.logErrorAndThrow(errMess);
+        }
+    }
+
+    /**
      * Restores all process environment variables that were modified by {@link setProcessEnv}
      * back to their original values. Variables that did not previously exist are deleted.
      *
      * @see {@link setProcessEnv}
+     * @see {@link resetProcessEnv}
      * @throws {Error} If an error occurs while resetting variables.
      */
-    public static resetProcessEnvs() {
-        try {
-            Object.entries(process.env).forEach(([key, value]) => {
-                if (key.startsWith(ENV_VAR_ORIGINAL_PREAMBLE)) {
-                    const varToSet = key.substring(ENV_VAR_ORIGINAL_PREAMBLE.length);
-                    if (value === "_undefined") {
-                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so deleting [${varToSet}] and [${key}]`);
-                        delete process.env[varToSet];
-                    } else {
-                        Log.writeLine(LogLevels.FrameworkDebug, `Found [${key}] (Value: ${value}) so restoring [${varToSet}] to [${value}] and deleting [${key}]`);
-                        process.env[varToSet] = value;
-                        delete process.env[key];
-                    }
-                }
-            });
-        } catch (err) {
-            const errMess = `Error resetting environment variables: ${(err as Error).message}`;
-            Log.writeLine(LogLevels.Error, errMess);
-            throw new Error(errMess);
-        }
+    public static resetProcessEnvs(): void {
+        Object.keys(process.env)
+            .filter((key) => key.startsWith(ENV_VAR_ORIGINAL_PREAMBLE))
+            .map((key) => key.substring(ENV_VAR_ORIGINAL_PREAMBLE.length))
+            .forEach((varName) => Utils.resetProcessEnv(varName));
     }
 
     // ── Object / JSON ─────────────────────────────────────────────────────────
@@ -564,79 +828,44 @@ export class Utils {
             return JsonUtils.parse(typeof original === "string" ? original : JSON.stringify(original as object), true);
         } else {
             const errText = "Object passed in is not valid JSON (JSON5 allowed) so cannot be cloned using JSON";
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
     /**
-     * Converts a URL glob pattern to an equivalent `RegExp`.
-     *
-     * Supported glob syntax:
-     * - `*` — matches any sequence of non-`/` characters
-     * - `**` — matches any path segment sequence (including `/`)
-     * - `?` — matches any single character
-     * - `{a,b}` — matches either `a` or `b`
-     * - `[...]` — character class, passed through as-is
+     * Converts a URL glob pattern to an equivalent `RegExp`. Thin, logged wrapper around
+     * `picomatch` — see https://github.com/micromatch/picomatch for the full supported syntax
+     * (including `*`, `**`, `?`, `{a,b}`, character classes, extglobs, and `!` negation).
      *
      * @param glob - The glob pattern to convert.
      * @param options - Optional anchoring flags:
      *   - `startOfLine` — Anchors the pattern to the start of the string (default: `true`).
      *   - `endOfLine` — Anchors the pattern to the end of the string (default: `true`).
      * @returns A `RegExp` equivalent to the given glob.
+     * @throws {Error} If `glob` is not a string, or if `picomatch` cannot convert it.
      *
      * @example
      * Utils.globToRegex("src/**\/*.ts").test("src/foo/bar.ts"); // true
      */
     static globToRegex(glob: string, options?: { startOfLine: boolean; endOfLine: boolean }): RegExp {
+        Utils.assertType(glob, "string", "Utils.globToRegex", "glob");
         const startOfLine = options?.startOfLine ?? true;
         const endOfLine = options?.endOfLine ?? true;
-        const charsToEscape = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
-        const regexExpression = startOfLine ? ["^"] : ["^.*"];
-        let inRegexpGroup = false;
 
-        for (let globCharIndex = 0; globCharIndex < glob.length; ++globCharIndex) {
-            const currentGlobChar = glob[globCharIndex];
-
-            if (currentGlobChar === "\\" && globCharIndex + 1 < glob.length) {
-                const nextGlobChar = glob[++globCharIndex];
-                regexExpression.push(charsToEscape.has(nextGlobChar) ? "\\" + nextGlobChar : nextGlobChar);
-                continue;
-            }
-
-            if (currentGlobChar === "*") {
-                const previousGlobChar = glob[globCharIndex - 1];
-                let starCount = 1;
-                while (glob[globCharIndex + 1] === "*") {
-                    starCount++;
-                    globCharIndex++;
-                }
-                const nextGlobChar = glob[globCharIndex + 1];
-                if (starCount > 1 && (previousGlobChar === "/" || previousGlobChar === undefined) && (nextGlobChar === "/" || nextGlobChar === undefined)) {
-                    // eslint-disable-next-line no-useless-escape
-                    regexExpression.push("((?:[^/]*(?:/|$))*)");
-                    globCharIndex++;
-                } else {
-                    regexExpression.push("([^/]*)");
-                }
-                continue;
-            }
-
-            switch (currentGlobChar) {
-                case "?":  regexExpression.push("."); break;
-                case "[":  regexExpression.push("["); break;
-                case "]":  regexExpression.push("]"); break;
-                case "{":  inRegexpGroup = true;  regexExpression.push("("); break;
-                case "}":  inRegexpGroup = false; regexExpression.push(")"); break;
-                case ",":
-                    regexExpression.push(inRegexpGroup ? "|" : "\\" + currentGlobChar);
-                    break;
-                default:
-                    regexExpression.push(charsToEscape.has(currentGlobChar) ? "\\" + currentGlobChar : currentGlobChar);
-            }
+        try {
+            const picomatchRegex = picomatch.makeRe(glob);
+            // picomatch always anchors its output as `^...$` — strip those so we can apply
+            // this function's own (asymmetric, independently-toggleable) anchoring instead.
+            let corePattern = picomatchRegex.source;
+            if (corePattern.startsWith("^")) corePattern = corePattern.slice(1);
+            if (corePattern.endsWith("$")) corePattern = corePattern.slice(0, -1);
+            const prefix = startOfLine ? "^" : "^.*";
+            const suffix = endOfLine ? "$" : ".*$";
+            return new RegExp(prefix + corePattern + suffix, picomatchRegex.flags);
+        } catch (err) {
+            const errText = `Cannot Utils.globToRegex as [glob] is not a valid glob pattern. Is [${Utils.describeValue(glob)}]: ${Utils.errorMessage(err)}`;
+            Log.logErrorAndThrow(errText);
         }
-        regexExpression.push(endOfLine ? "$" : ".*$");
-        return new RegExp(regexExpression.join(""));
     }
 
     // ── HTML ──────────────────────────────────────────────────────────────────
@@ -702,9 +931,8 @@ export class Utils {
         try {
             return jwtSign(payload, normalizedSignature, jwtHeader);
         } catch (err) {
-            const errText = `Error creating [${typeof options === 'string' ? options : JSON.stringify(options as object)}] JWT token from [${payloadData}] (signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${(err as Error).message}`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            const errText = `Error creating [${typeof options === 'string' ? options : JSON.stringify(options as object)}] JWT token from [${payloadData}] (signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${Utils.errorMessage(err)}`;
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -738,9 +966,8 @@ export class Utils {
             }
             return payload as object;
         } catch (err) {
-            const errText = `Error getting payload from JWT [${jwtToken ?? "<Undefined>"}]: ${(err as Error).message}`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            const errText = `Error getting payload from JWT [${jwtToken ?? "<Undefined>"}]: ${Utils.errorMessage(err)}`;
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -763,8 +990,7 @@ export class Utils {
         const childProcess = spawn(command, args, spawnOptions);
         if (childProcess?.pid === undefined) {
             const errText = `Unable to spawn [${command}] with args [${args.join(', ')}] and options [${spawnOptions === undefined ? '' : JSON.stringify(spawnOptions)}] — spawn returned undefined PID`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
         Log.writeLine(LogLevels.TestInformation, `Started process: PID ${childProcess.pid}`);
 
@@ -778,7 +1004,7 @@ export class Utils {
                 Log.writeLine(LogLevels.TestInformation, `Background(stderr): ${data.toString()}`, { suppressAllPreamble: true });
             });
             childProcess.on('error', (err) => {
-                Log.writeLine(LogLevels.Error, `Background process error: ${(err as Error).message}`, { suppressAllPreamble: true });
+                Log.writeLine(LogLevels.Error, `Background process error: ${Utils.errorMessage(err)}`, { suppressAllPreamble: true });
             });
         }
         return childProcess;
@@ -877,40 +1103,30 @@ export class Utils {
     }
 
     /**
-     * Sends a signal to a process and all of its descendants, leaf-first (post-order traversal).
+     * Sends a signal to a process and all of its descendants. Thin, logged wrapper around
+     * `tree-kill` — chosen over a hand-rolled `ps`-tree-walk because it also handles Windows
+     * correctly (via `taskkill /T /F`), where POSIX signals don't translate the way
+     * `process.kill(pid, signal)` alone would assume.
+     *
+     * Individual kill failures (e.g. a descendant that already exited in a race) are logged
+     * but do not reject the returned promise — this is a best-effort cleanup operation, and a
+     * benign race during teardown should never mask the actual test failure by throwing.
      *
      * @param rootPid - PID of the root process to terminate.
-     * @param signal - Signal to send (default: `"SIGKILL"`).
+     * @param signal - Signal to send (default: `"SIGKILL"`). Ignored on Windows — `taskkill /F`
+     *   is unconditional there, matching `tree-kill`'s own platform behaviour.
+     * @throws {Error} If `rootPid` is not a number.
      */
     static async killProcessAndDescendants(rootPid: number, signal: NodeJS.Signals = 'SIGKILL'): Promise<void> {
-        type PS = { PID: string; PPID: string; COMMAND: string };
-
-        const children: PS[] = await new Promise((resolve, reject) => {
-            psTree(rootPid, (err, result) => {
-                if (err) return reject(err);
-                resolve([...result]);
+        Utils.assertType(rootPid, "number", "Utils.killProcessAndDescendants", "rootPid");
+        return new Promise((resolve) => {
+            treeKill(rootPid, signal, (err) => {
+                if (err) {
+                    Log.writeLine(LogLevels.Error, `Killing process tree rooted at [${rootPid}] with [${signal}] threw error (ignoring): ${Utils.errorMessage(err)}`);
+                }
+                resolve();
             });
         });
-
-        const tree = new Map<number, number[]>();
-        for (const proc of children) {
-            const pid = Number(proc.PID);
-            const ppid = Number(proc.PPID);
-            if (!tree.has(ppid)) tree.set(ppid, []);
-            tree.get(ppid)!.push(pid);
-        }
-
-        const killRecursively = (pid: number) => {
-            const childPids = tree.get(pid) ?? [];
-            for (const childPid of childPids) killRecursively(childPid);
-            try {
-                process.kill(pid, signal);
-            } catch (err) {
-                Log.writeLine(LogLevels.Error, `Killing process [${pid}] with [${signal}] threw error (ignoring): ${(err as Error).message}`);
-            }
-        };
-
-        killRecursively(rootPid);
     }
 
     /**
@@ -1025,14 +1241,12 @@ export class Utils {
         try {
             if (Utils.isNullOrUndefined(options?.timeoutMS) && Utils._defaultPromiseTimeout === 0) {
                 const errText = 'Utils.timeoutPromise: No timeout given and default not set (have you initialised the default timeout?)';
-                Log.writeLine(LogLevels.Error, errText);
-                throw new Error(errText);
+                Log.logErrorAndThrow(errText);
             }
             const actualTimeout = (Utils.isNullOrUndefined(options?.timeoutMS) ? Utils._defaultPromiseTimeout : options?.timeoutMS) as number;
             if (actualTimeout < 0) {
                 const errText = `Utils.timeoutPromise: Timeout cannot be negative. Was [${actualTimeout}]`;
-                Log.writeLine(LogLevels.Error, errText);
-                throw new Error(errText);
+                Log.logErrorAndThrow(errText);
             }
             return this.withTimeout<T>(promise, { timeoutMS: actualTimeout, friendlyName: operationName });
         } finally {
@@ -1077,8 +1291,7 @@ export class Utils {
                 return { action: actionAndParameters.verb, normalizedAction, parameters: paramsMap };
             } else {
                 const errText = `Invalid action [${actionAndParameters.verb}] parameter syntax. Expected (param1: <value>, param2: <value2>, ...). Got: (${actionAndParameters.parameters})`;
-                Log.writeLine(LogLevels.Error, errText);
-                throw new Error(errText);
+                Log.logErrorAndThrow(errText);
             }
         }
     }

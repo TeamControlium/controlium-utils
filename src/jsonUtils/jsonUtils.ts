@@ -2,7 +2,7 @@ import json5 from "json5";
 import * as JSONPath from "jsonpath-plus";
 import JSONPointer from "jsonpointer";
 
-import { Log, LogLevels, StringUtils, Utils } from "../index";
+import { Log, LogLevels, StringUtils, Utils } from "../index.js";
 
 /**
  * JSON utility methods for querying, manipulating, parsing and validating JSON objects.
@@ -20,11 +20,11 @@ export class JsonUtils {
    * JsonUtils.getParentPath("$.a.b.c"); // returns "$.a.b"
    */
   static getParentPath(pathToChild: string): string {
+    Utils.assertType(pathToChild, "string", "JsonUtils.getParentPath", "pathToChild");
     const pathArray = JSONPath.JSONPath.toPathArray((pathToChild.startsWith(".") ? "" : ".") + pathToChild);
     if (pathArray.length < 2) {
       const errText = `Unable to get Parent as child [${pathToChild}] has no parent (it is top level)!`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
+      Log.logErrorAndThrow(errText);
     }
     pathArray.pop();
     return JSONPath.JSONPath.toPathString(pathArray);
@@ -47,17 +47,18 @@ export class JsonUtils {
    * // result => { a: { c: 1 } }
    */
   static withRenamedProperty(jsonObject: object, pathToPropertyToRename: string, newName: string): object {
+    Utils.assertShape(jsonObject, "nonNullObject", "JsonUtils.withRenamedProperty", "jsonObject");
+    Utils.assertType(pathToPropertyToRename, "string", "JsonUtils.withRenamedProperty", "pathToPropertyToRename");
+    Utils.assertType(newName, "string", "JsonUtils.withRenamedProperty", "newName");
     const normalizedNewName = newName.trim();
     const parentPath = this.getParentPath(pathToPropertyToRename);
     const objectBeingRenamed = this.getPropertiesMatchingPath(jsonObject, pathToPropertyToRename);
     if (objectBeingRenamed.length === 0) {
       const errText = `renameJsonObjectProperty: cannot rename - JSON Path [${pathToPropertyToRename}] matches nothing`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
+      Log.logErrorAndThrow(errText);
     } else if (objectBeingRenamed.length > 1) {
       const errText = `renameJsonObjectProperty: cannot rename - JSON Path [${pathToPropertyToRename}] matches ${objectBeingRenamed.length} fields/objects!! Expected exactly 1 match`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
+      Log.logErrorAndThrow(errText);
     } else {
       const objectBeingRenamedParent = this.getPropertiesMatchingPath(jsonObject, parentPath);
       let pathToNewObject = StringUtils.replaceAll(objectBeingRenamedParent[0].pointer, "/", ".") as string;
@@ -89,15 +90,16 @@ export class JsonUtils {
    * // result => { a: { x: 1, y: 2 } }
    */
   static mergeObjectIntoProperty(jsonObject: object, pathToPropertyToMergeInto: string, objectToMerge: object): object {
+    Utils.assertShape(jsonObject, "nonNullObject", "JsonUtils.mergeObjectIntoProperty", "jsonObject");
+    Utils.assertType(pathToPropertyToMergeInto, "string", "JsonUtils.mergeObjectIntoProperty", "pathToPropertyToMergeInto");
+    Utils.assertShape(objectToMerge, "nonNullObject", "JsonUtils.mergeObjectIntoProperty", "objectToMerge");
     const objectToMergeWith = this.getPropertiesMatchingPath(jsonObject, pathToPropertyToMergeInto);
     if (objectToMergeWith.length === 0) {
       const errText = `mergeJsonObjects: cannot merge - JSON Path [${pathToPropertyToMergeInto}] matches nothing`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
+      Log.logErrorAndThrow(errText);
     } else if (objectToMergeWith.length > 1) {
       const errText = `mergeJsonObjects: cannot merge - JSON Path [${pathToPropertyToMergeInto}] matches ${objectToMergeWith.length} fields/objects!! Expected exactly 1 match`;
-      Log.writeLine(LogLevels.Error, errText);
-      throw new Error(errText);
+      Log.logErrorAndThrow(errText);
     } else {
       const targetObject = objectToMergeWith[0].value as object;
       let mergedOriginalObject = jsonObject;
@@ -123,6 +125,7 @@ export class JsonUtils {
    * @throws {Error} If the file cannot be read.
    */
   static getObjectFromFile(pathAndFilename: string, options?: { encoding?: BufferEncoding; detokeniseFileContents?: boolean }): object {
+    Utils.assertType(pathAndFilename, "string", "JsonUtils.getObjectFromFile", "pathAndFilename");
     const processedJson = Utils.getFileContents(pathAndFilename, { encoding: options?.encoding, detokeniseFileContents: options?.detokeniseFileContents });
     if (this.isJson(processedJson)) {
       const jsonObject = JSON.parse(processedJson);
@@ -155,15 +158,13 @@ export class JsonUtils {
     }
     if (typeof item !== "string") {
       const errMsg = `Cannot parse item [${typeof item}] as not null or string!`;
-      Log.writeLine(LogLevels.Error, errMsg);
-      throw new Error(errMsg);
+      Log.logErrorAndThrow(errMsg);
     }
     try {
       return useJson5 ? json5.parse(item) : JSON.parse(item);
     } catch (err) {
-      const errTxt = `Cannot parse item [${item.length < 50 ? item : `Length ${item.length}`}]: ${(err as Error).message}`;
-      Log.writeLine(LogLevels.Error, errTxt);
-      throw new Error(errTxt);
+      const errTxt = `Cannot parse item [${item.length < 50 ? item : `Length ${item.length}`}]: ${Utils.errorMessage(err)}`;
+      Log.logErrorAndThrow(errTxt);
     }
   }
 
@@ -224,6 +225,7 @@ export class JsonUtils {
     jsonObject: object | string,
     pathToJSONProperties: string
   ): Array<{ value: unknown; pointer: string; parent: object }> {
+    Utils.assertType(pathToJSONProperties, "string", "JsonUtils.getPropertiesMatchingPath", "pathToJSONProperties");
     try {
       if (!this.isJson(jsonObject)) {
         throw new Error("Passed object is not a valid Json Object");
@@ -276,6 +278,7 @@ export class JsonUtils {
    * JsonUtils.updateJSONObject({ a: 1 }, "$.a", "_undefined"); // => {}
    */
   static updateJSONObject(currentObject: object, pathString: string, value: string | object | boolean | number | null): object {
+    Utils.assertType(pathString, "string", "JsonUtils.updateJSONObject", "pathString");
     let jsonPointer: string;
     Log.writeLine(LogLevels.FrameworkInformation, `Setting [${pathString}] of object to [${typeof value !== "object" ? value : "an object value"}]`);
 
@@ -285,8 +288,7 @@ export class JsonUtils {
         modifiedObject = JsonUtils.parse(JSON.stringify(currentObject));
       } else {
         const errMsg = "Object is not a JSON object.  Cannot update!";
-        Log.writeLine(LogLevels.Error, errMsg);
-        throw new Error(errMsg);
+        Log.logErrorAndThrow(errMsg);
       }
       const matchingProperties = this.getPropertiesMatchingPath(modifiedObject, pathString);
       if (matchingProperties.length === 0) {
@@ -325,8 +327,7 @@ export class JsonUtils {
         const setValue = JSONPointer.get(modifiedObject, jsonPointer);
         if (setValue !== value) {
           const errMessage = `After setting [${pathString}] to value: ${typeof value === "object" ? "\n" + JSON.stringify(value as object, null, 2) : `[${value}]`}\nCheck showed it was now:  ${typeof setValue === "object" ? "\n" + JSON.stringify(setValue as object, null, 2) : `[${setValue}]`}`;
-          Log.writeLine(LogLevels.Error, errMessage);
-          throw new Error(errMessage);
+          Log.logErrorAndThrow(errMessage);
         }
       }
       return modifiedObject;
@@ -361,6 +362,7 @@ export class JsonUtils {
    * JsonUtils.getMatchingJSONPropertyCount({ a: 1, b: 2 }, "$.*"); // => 2
    */
   static getMatchingJSONPropertyCount(jsonObject: object, pathString: string): number {
+    Utils.assertType(pathString, "string", "JsonUtils.getMatchingJSONPropertyCount", "pathString");
     if (!this.isJson(jsonObject)) {
       Log.writeLine(LogLevels.Error, "Passed object is not a valid Json Object. Aborting");
       throw new Error("Passed object is not a valid Json Object");
@@ -388,6 +390,10 @@ export class JsonUtils {
    * // obj => { b: { c: 3 } }
    */
   public static removeJsonPropertyByKey(jsonObject: object | Array<object>, removeKeys: string[], throwError = false) {
+    if (!Array.isArray(removeKeys) || !removeKeys.every((key) => typeof key === "string")) {
+      const errText = `Cannot JsonUtils.removeJsonPropertyByKey as [removeKeys] must be a string array. Is [${Utils.describeValue(removeKeys)}]`;
+      Log.logErrorAndThrow(errText);
+    }
     try {
       if (Array.isArray(jsonObject)) {
         Log.writeLine(LogLevels.FrameworkDebug, "JSON Object is an array, itterating through array and removing required key/s from each item");
@@ -430,6 +436,7 @@ export class JsonUtils {
    * new RegExp(JsonUtils.escapeRegExp("1+1=2")); // matches literal "1+1=2"
    */
   public static escapeRegExp(toBeEscaped: string): string {
+    Utils.assertType(toBeEscaped, "string", "JsonUtils.escapeRegExp", "toBeEscaped");
     return toBeEscaped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 }
