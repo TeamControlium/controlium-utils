@@ -485,8 +485,7 @@ export class Logger {
     this.assertParamType(logLevel, "number", "Logger.attachScreenshot", "logLevel");
     if (!Buffer.isBuffer(screenshot) && typeof screenshot !== "string") {
       const errorText = `Cannot Logger.attachScreenshot as [screenshot] must be a Buffer or string. Is [${typeof screenshot}]`;
-      Logger.writeLine(this.Levels.Error, errorText);
-      throw new Error(errorText);
+      Logger.logErrorAndThrow(errorText);
     }
     if (this.logLevelOk(logLevel)) {
       if (typeof screenshot === "string") {
@@ -579,8 +578,7 @@ export class Logger {
     this.assertParamType(logLevel, "number", "Logger.attachVideo", "logLevel");
     if (!Buffer.isBuffer(video)) {
       const errorText = `Cannot Logger.attachVideo as [video] must be a Buffer. Is [${typeof video}]`;
-      Logger.writeLine(this.Levels.Error, errorText);
-      throw new Error(errorText);
+      Logger.logErrorAndThrow(errorText);
     }
     const actualOptions =
       options == null
@@ -710,8 +708,7 @@ export class Logger {
 
       if (normalizedMaxLines < 3) {
         const errorMessage = `maxLines must be 3 or greater!  Number given was <${maxLines}>`
-        Logger.writeLine(this.Levels.Error, errorMessage);
-        throw new Error(errorMessage);
+        Logger.logErrorAndThrow(errorMessage);
       }
 
       textArray.forEach((line: string, index: number) => {
@@ -740,6 +737,35 @@ export class Logger {
         isFirstLine = false;
       });
     }
+  }
+
+  /**
+   * Builds an `Error` from `message`, logs it at {@link Levels.Error}, and throws it —
+   * collapsing the "build message, log it, throw it" pattern used throughout this package
+   * into one call. Typed `never` so TypeScript still treats code after the call as
+   * unreachable, exactly as it would after a bare `throw` — this holds even for a bare
+   * statement call, no `throw` keyword needed at the call site, as long as the call is the
+   * last thing in that code path.
+   *
+   * Always adds one to `options.stackOffset` before passing it to {@link writeLine} — like
+   * {@link assertParamType}, this is itself a generic, many-caller helper, so its own
+   * location is never useful in the log; the caller's location is. Pass `stackOffset` in
+   * `options` if the *caller* is itself a generic helper needing to skip an additional frame.
+   *
+   * @param message - The error message. Logged as-is, then used to construct the thrown `Error`.
+   * @param options - Same {@link WriteLineOptions} as {@link writeLine}.
+   * @throws {Error} Always — this function never returns.
+   *
+   * @example
+   * if (bad) Logger.logErrorAndThrow(`Cannot frobnicate as [x] is bad`);
+   * // equivalent to, but replaces:
+   * //   const errText = `Cannot frobnicate as [x] is bad`;
+   * //   Logger.writeLine(Logger.Levels.Error, errText);
+   * //   throw new Error(errText);
+   */
+  public static logErrorAndThrow(message: string, options?: WriteLineOptions): never {
+    Logger.writeLine(this.Levels.Error, message, { ...options, stackOffset: (options?.stackOffset ?? 0) + 1 });
+    throw new Error(message);
   }
 
   // ----------------------------
@@ -1046,8 +1072,7 @@ export class Logger {
       // report the caller, not this. (When called from writeLine validating its own params,
       // this still lands one frame short of the true external caller — an accepted limitation,
       // consistent with how Utils.assertType/JsonUtils.assertObject apply the same +1 convention.)
-      Logger.writeLine(this.Levels.Error, errorText, { stackOffset: 1 });
-      throw new Error(errorText);
+      Logger.logErrorAndThrow(errorText, { stackOffset: 1 });
     }
   }
 

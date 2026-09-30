@@ -140,8 +140,7 @@ export class Utils {
             const errorText = `Cannot ${funcName} as [${paramName}] not '${expectedType}' type. Is [${Utils.describeValue(value)}]`;
             // stackOffset: 1 — assertType is a generic helper called from dozens of sites;
             // its own location is never useful, only the caller whose check actually failed.
-            Log.writeLine(LogLevels.Error, errorText, { stackOffset: 1 });
-            throw new Error(errorText);
+            Log.logErrorAndThrow(errorText, { stackOffset: 1 });
         }
     }
 
@@ -166,8 +165,7 @@ export class Utils {
         if (!Utils.matchesShape(value, expectedShape)) {
             const errorText = `Cannot ${funcName} as [${paramName}] not a valid '${expectedShape}'. Is [${Utils.describeValue(value)}]`;
             // stackOffset: 1 — same generic-helper reasoning as assertType (see there).
-            Log.writeLine(LogLevels.Error, errorText, { stackOffset: 1 });
-            throw new Error(errorText);
+            Log.logErrorAndThrow(errorText, { stackOffset: 1 });
         }
     }
 
@@ -504,13 +502,12 @@ export class Utils {
                     }
                     case ExistingFileWriteActions.ThrowError: {
                         const errText = `File [${fullFilename}] exists and action is ThrowError!`;
-                        Log.writeLine(LogLevels.Error, errText);
-                        throw new Error(errText);
+                        Log.logErrorAndThrow(errText);
+                        break;
                     }
                     default: {
                         const errText = `Cannot write to file [${fullFilename}] — unknown action [${ifExistsAction}]!`;
-                        Log.writeLine(LogLevels.Error, errText);
-                        throw new Error(errText);
+                        Log.logErrorAndThrow(errText);
                     }
                 }
             } else {
@@ -568,8 +565,7 @@ export class Utils {
             return contents;
         } catch (err) {
             const errText = `Utils.getFileContents - Reading file using ${encoding} (${detokenise ? "" : "not "}detokenised) threw error: [${err}]`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -586,8 +582,7 @@ export class Utils {
             return readFileSync(filePath);
         } catch (err) {
             const errText = `Utils.getFileContentsBuffer - readFileSync for path [${filePath}] threw error: [${err}]`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -719,8 +714,7 @@ export class Utils {
             });
         } catch (err) {
             const errMess = `Error resetting environment variables: ${Utils.errorMessage(err)}`;
-            Log.writeLine(LogLevels.Error, errMess);
-            throw new Error(errMess);
+            Log.logErrorAndThrow(errMess);
         }
     }
 
@@ -739,8 +733,7 @@ export class Utils {
             return JsonUtils.parse(typeof original === "string" ? original : JSON.stringify(original as object), true);
         } else {
             const errText = "Object passed in is not valid JSON (JSON5 allowed) so cannot be cloned using JSON";
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -776,8 +769,7 @@ export class Utils {
             return new RegExp(prefix + corePattern + suffix, picomatchRegex.flags);
         } catch (err) {
             const errText = `Cannot Utils.globToRegex as [glob] is not a valid glob pattern. Is [${Utils.describeValue(glob)}]: ${Utils.errorMessage(err)}`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -845,8 +837,7 @@ export class Utils {
             return jwtSign(payload, normalizedSignature, jwtHeader);
         } catch (err) {
             const errText = `Error creating [${typeof options === 'string' ? options : JSON.stringify(options as object)}] JWT token from [${payloadData}] (signature: [${StringUtils.replaceAll(signature, '\\\\n', '<NEWLINE>')}]): ${Utils.errorMessage(err)}`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -881,8 +872,7 @@ export class Utils {
             return payload as object;
         } catch (err) {
             const errText = `Error getting payload from JWT [${jwtToken ?? "<Undefined>"}]: ${Utils.errorMessage(err)}`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
     }
 
@@ -905,8 +895,7 @@ export class Utils {
         const childProcess = spawn(command, args, spawnOptions);
         if (childProcess?.pid === undefined) {
             const errText = `Unable to spawn [${command}] with args [${args.join(', ')}] and options [${spawnOptions === undefined ? '' : JSON.stringify(spawnOptions)}] — spawn returned undefined PID`;
-            Log.writeLine(LogLevels.Error, errText);
-            throw new Error(errText);
+            Log.logErrorAndThrow(errText);
         }
         Log.writeLine(LogLevels.TestInformation, `Started process: PID ${childProcess.pid}`);
 
@@ -1157,14 +1146,12 @@ export class Utils {
         try {
             if (Utils.isNullOrUndefined(options?.timeoutMS) && Utils._defaultPromiseTimeout === 0) {
                 const errText = 'Utils.timeoutPromise: No timeout given and default not set (have you initialised the default timeout?)';
-                Log.writeLine(LogLevels.Error, errText);
-                throw new Error(errText);
+                Log.logErrorAndThrow(errText);
             }
             const actualTimeout = (Utils.isNullOrUndefined(options?.timeoutMS) ? Utils._defaultPromiseTimeout : options?.timeoutMS) as number;
             if (actualTimeout < 0) {
                 const errText = `Utils.timeoutPromise: Timeout cannot be negative. Was [${actualTimeout}]`;
-                Log.writeLine(LogLevels.Error, errText);
-                throw new Error(errText);
+                Log.logErrorAndThrow(errText);
             }
             return this.withTimeout<T>(promise, { timeoutMS: actualTimeout, friendlyName: operationName });
         } finally {
@@ -1209,8 +1196,7 @@ export class Utils {
                 return { action: actionAndParameters.verb, normalizedAction, parameters: paramsMap };
             } else {
                 const errText = `Invalid action [${actionAndParameters.verb}] parameter syntax. Expected (param1: <value>, param2: <value2>, ...). Got: (${actionAndParameters.parameters})`;
-                Log.writeLine(LogLevels.Error, errText);
-                throw new Error(errText);
+                Log.logErrorAndThrow(errText);
             }
         }
     }

@@ -475,8 +475,7 @@ export class Mock {
 
   private static throwError(funcName: string, message: string): never {
     const errorText = `Mock.${funcName}: ${message}`;
-    Log.writeLine(LogLevels.Error, errorText, { stackOffset: 1 });
-    throw new Error(errorText);
+    Log.logErrorAndThrow(errorText, { stackOffset: 1 });
   }
 
   private static findMatch(request: Mock.Request): Mock.Listener | undefined {

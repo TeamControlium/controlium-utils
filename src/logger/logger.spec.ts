@@ -734,7 +734,7 @@ describe("Logger", () => {
 
     beforeEach(() => {
       logOutput = [];
-      logSpy = vi.spyOn(console, "log").mockImplementation();
+      logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       Logger.loggingLevel = Logger.Levels.FrameworkDebug;
     });
 
@@ -815,7 +815,7 @@ describe("Logger", () => {
     });
 
     it("logs an error when callback is not a function", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       Logger.clearOutputCallback();
       Logger.logToConsole = false;
       Logger.attach(Logger.Levels.Error, "test", "text/plain");
@@ -828,7 +828,7 @@ describe("Logger", () => {
 
     it("when callback is set to a non-function, error is logged via console", () => {
       (Logger.logOutputCallback as any) = "not-a-function";
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation();
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       Logger.attach(Logger.Levels.Error, "test", "text/plain");
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringMatching(/Log Output callback is type \[string\]/)

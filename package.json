@@ -30,10 +30,12 @@
     "clean": "rm -rf dist coverage",
     "build:esm": "tsc -p tsconfig.build.json",
     "build": "npm run clean && npm run build:esm",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:debug": "vitest run --reporter=verbose mock.spec",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint 'src/**/*.ts' --fix",
+    "lint:check": "eslint 'src/**/*.ts'",
     "release": "semantic-release"
   },
   "keywords": [
