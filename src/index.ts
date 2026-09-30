@@ -41,6 +41,8 @@ export { APIUtils } from "./apiUtils/APIUtils.js";
 export { JsonUtils } from "./jsonUtils/jsonUtils.js";
 export { StringUtils } from "./stringUtils/stringUtils.js";
 export { Utils, ExistingFileWriteActions } from "./utils/utils.js";
-export type { AssertTypeMap, AssertShapeMap, ActionAndParams } from "./utils/utils.js";
+export type { AssertTypeMap, AssertShapeMap, ActionAndParams, SettingResult, SettingsContext } from "./utils/utils.js";
 
 export { Mock } from "./mock/mock.js";
+
+export { Settings } from "./settings/settings.js";

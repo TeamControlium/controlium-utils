@@ -551,11 +551,16 @@ export class Detokeniser {
       const errText = `Token 'Setting'.\nExpected: parameters in name: value format (IE. ${this._startTokenChar}setting;processEnvName: "MY_SETTING"${this._endTokenChar}\nToken was: ${this._startTokenChar}setting;${tokenBody}${this._endTokenChar}\n\nValid Setting parameters include;\n  processEnvName - Name of process env variable\n  npmPackageConfigName - Name of NPM config var\n  profileParameterName - Name of Cucumber profile parameter\n  defaultValue - default value if cannot be found`;
       Log.logErrorAndThrow(errText);
     }
-    const result = Utils.getSetting(LogLevels.TestInformation, "From Detokeniser", JsonUtils.parse(bodyJSON, true), options.contextParameters);
-    if (Utils.isNullOrUndefined(result)) {
-      return result as undefined;
+    const { value } = Utils.getSetting(
+      LogLevels.TestInformation,
+      "From Detokeniser",
+      JsonUtils.parse(bodyJSON, true),
+      options.contextParameters ? { parameters: options.contextParameters } : undefined
+    );
+    if (Utils.isNullOrUndefined(value)) {
+      return value as undefined;
     } else {
-      return typeof result === 'object' ? JSON.stringify(result) : String(result);
+      return typeof value === 'object' ? JSON.stringify(value) : String(value);
     }
   }
 

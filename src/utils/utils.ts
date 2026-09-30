@@ -79,6 +79,36 @@ export interface AssertShapeMap {
     port: number;
 }
 
+/**
+ * Result of {@link Utils.getSetting} — the resolved value alongside a human-readable
+ * description of where it came from (e.g. `"Env var 'API_URL'"`, `"World 'eaTest.apiUrl'"`,
+ * `"Default value"`, `"Not found"`).
+ */
+export interface SettingResult<T> {
+    value: T | undefined;
+    source: string;
+}
+
+/**
+ * Context {@link Utils.getSetting} resolves a `profileParameterName` JSONPath against.
+ * `parameters` is the actual object to query (e.g. a Cucumber World); `sourceName` is a
+ * cosmetic label for what `parameters` *is*, shown in the returned `source` description
+ * in place of the generic default `"Profile"` — it has no effect on resolution itself.
+ */
+export interface SettingsContext {
+    sourceName?: string;
+    /**
+     * The actual object to query with `profileParameterName` — e.g. a Cucumber World
+     * instance. Deliberately typed `object`, not `Record<string, unknown>` — a real class
+     * instance (any class, not just a World) doesn't satisfy an index-signature type like
+     * `Record<string, unknown>` even though every property on it is individually compatible
+     * with `unknown`; TypeScript requires the source to have its own index signature, which
+     * ordinary classes don't. `object` matches what {@link JsonUtils.getPropertiesMatchingPath}/
+     * {@link JsonUtils.getMatchingJSONPropertyCount} already accept underneath this.
+     */
+    parameters: object;
+}
+
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
 /**
@@ -592,19 +622,39 @@ export class Utils {
      * Resolves a setting value from, in priority order:
      * 1. A process environment variable
      * 2. An npm package config variable
-     * 3. A named property within `contextParameters`
+     * 3. A named property within `contextParameters.parameters`
      * 4. A supplied default value
+     *
+     * Returns both the value *and* a human-readable description of where it came from —
+     * useful for a test's own diagnostic/failure output ("apiUrl came from Env var
+     * 'API_URL'", say), not just the value in isolation.
      *
      * @param logLevel - Log level used when reporting where the setting was found.
      * @param settingName - Human-readable name for the setting, used in log messages.
      * @param sources - Named sources to check:
      *   - `processEnvName` — Environment variable name.
      *   - `npmPackageConfigName` — npm package config key.
-     *   - `profileParameterName` — JSONPath into `contextParameters`.
+     *   - `profileParameterName` — JSONPath into `contextParameters.parameters`.
      *   - `defaultValue` — Fallback if no other source resolves.
-     * @param contextParameters - Optional context parameters used to resolve `profileParameterName`.
-     * @returns The resolved setting value, or `undefined` if no source resolved.
+     * @param contextParameters - Optional context used to resolve `profileParameterName`:
+     *   - `parameters` — The actual object to query with `profileParameterName`.
+     *   - `sourceName` — Label identifying what `parameters` *is* (e.g. `"World"` for a
+     *     Cucumber World object), used in the returned `source` description in place of the
+     *     generic default `"Profile"`. Purely cosmetic — doesn't affect resolution.
+     * @returns `{ value, source }` — `value` is the resolved setting (or `undefined` if no
+     *   source resolved); `source` always describes where it came from, even when `value`
+     *   is `undefined` (`"Not found"`) or came from `defaultValue` (`"Default value"`).
      * @throws {Error} If `profileParameterName` is given but `contextParameters` is null.
+     *
+     * @example
+     * Utils.getSetting(LogLevels.TestInformation, "apiUrl", { processEnvName: "API_URL" });
+     * // => { value: "http://...", source: "Env var 'API_URL'" }
+     *
+     * Utils.getSetting(LogLevels.TestInformation, "apiUrl",
+     *   { profileParameterName: "$.eaTest.apiUrl" },
+     *   { sourceName: "World", parameters: world }
+     * );
+     * // => { value: "http://...", source: "World 'eaTest.apiUrl'" }
      */
     public static getSetting<returnType>(
         logLevel: LogLevel,
@@ -615,49 +665,65 @@ export class Utils {
             profileParameterName?: string | undefined;
             defaultValue?: returnType | undefined;
         },
-        contextParameters?: Record<string, unknown>
-    ): returnType | undefined {
+        contextParameters?: SettingsContext,
+    ): SettingResult<returnType> {
+        Utils.assertType(logLevel, "number", "Utils.getSetting", "logLevel");
+        Utils.assertShape(settingName, "nonEmptyString", "Utils.getSetting", "settingName");
+        Utils.assertShape(sources, "nonNullObject", "Utils.getSetting", "sources");
         const debugString = `Got setting [${settingName}] from `;
 
         // Highest priority — process environment variable
         let returnValue: unknown = sources.processEnvName ? process.env[sources.processEnvName] : undefined;
         if (!Utils.isUndefined(returnValue)) {
             Log.writeLine(logLevel, debugString + `env var [${sources.processEnvName}]. Value: <${returnValue as returnType}>`);
-            return returnValue as returnType;
+            return { value: returnValue as returnType, source: `Env var '${sources.processEnvName}'` };
         }
 
         // Next priority — npm package config variable
         returnValue = sources.npmPackageConfigName ? process.env["npm_package_config_" + sources.npmPackageConfigName] : undefined;
         if (!Utils.isUndefined(returnValue)) {
             Log.writeLine(logLevel, debugString + `npm package config var [${sources.npmPackageConfigName}]. Value: <${returnValue as returnType}>`);
-            return returnValue as returnType;
+            return { value: returnValue as returnType, source: `npm package config '${sources.npmPackageConfigName}'` };
         }
 
-        // If no profile parameter name given, or it doesn't match exactly one property, fall back to default
-        if (
-            Utils.isUndefined(sources.profileParameterName) ||
-            (contextParameters && JsonUtils.getMatchingJSONPropertyCount(contextParameters as object, sources.profileParameterName as string)) !== 1
-        ) {
+        const parameters = contextParameters?.parameters;
+        const sourceLabel = contextParameters?.sourceName ?? "Profile";
+
+        // How many properties does the profile path match? Only meaningful if both a path
+        // and a context object were actually given.
+        const matchCount = (!Utils.isUndefined(sources.profileParameterName) && parameters)
+            ? JsonUtils.getMatchingJSONPropertyCount(parameters, sources.profileParameterName)
+            : undefined;
+
+        // If no profile parameter name given, or it doesn't match exactly one property, fall back to
+        // default. "Matched nothing" and "matched more than one" are different problems — an ambiguous
+        // path usually means the path itself is wrong, not that the setting is simply unconfigured —
+        // so ambiguity gets its own distinct log message, even though both still fall back to the
+        // same default/undefined result (the caller can't act differently either way, but a reader
+        // debugging why a setting came back as the default needs to know which case it was).
+        if (Utils.isUndefined(sources.profileParameterName) || matchCount !== 1) {
+            if (typeof matchCount === "number" && matchCount > 1) {
+                Log.writeLine(LogLevels.Warning, `Profile parameter [${sources.profileParameterName}] for setting [${settingName}] is ambiguous — matched ${matchCount} properties, expected exactly 1. Treating as not found.`);
+            }
             returnValue = sources.defaultValue;
             if (Utils.isUndefined(returnValue)) {
                 Log.writeLine(LogLevels.Error, `Unable to determine value for setting [${settingName}]. Returning: <undefined>!`);
-                return undefined;
+                return { value: undefined, source: "Not found" };
             } else {
                 Log.writeLine(logLevel, debugString + `default value: <${returnValue as returnType}>`);
-                return returnValue as returnType;
+                return { value: returnValue as returnType, source: "Default value" };
             }
         }
 
         // Profile parameter name given AND exactly one match exists — use it
-        if (Utils.isNullOrUndefined(contextParameters)) {
-            const errorTxt = `Caller defined Profile parameter [${sources.profileParameterName}] but contextParameters is null!`;
-            Log.writeLine(LogLevels.Error, errorTxt);
-            throw new Error("Settings: " + errorTxt);
-        } else {
-            returnValue = JsonUtils.getPropertiesMatchingPath(contextParameters as object, sources.profileParameterName as string)[0].value as returnType;
-            Log.writeLine(logLevel, debugString + `profile property [${sources.profileParameterName}] value: <${returnValue as returnType}>`);
+        if (Utils.isNullOrUndefined(parameters)) {
+            Log.logErrorAndThrow(`Settings: Caller defined Profile parameter [${sources.profileParameterName}] but contextParameters is null!`);
         }
-        return returnValue as returnType;
+        returnValue = JsonUtils.getPropertiesMatchingPath(parameters, sources.profileParameterName as string)[0].value as returnType;
+        // Strip the JSONPath root ("$." or "$") for a human-readable path — "$.eaTest.apiUrl" -> "eaTest.apiUrl".
+        const humanReadablePath = (sources.profileParameterName as string).replace(/^\$\.?/, "");
+        Log.writeLine(logLevel, debugString + `profile property [${sources.profileParameterName}] value: <${returnValue as returnType}>`);
+        return { value: returnValue as returnType, source: `${sourceLabel} '${humanReadablePath}'` };
     }
 
     /**
